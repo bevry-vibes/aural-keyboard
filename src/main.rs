@@ -101,7 +101,7 @@ fn main() -> Result<()> {
             println!(
                 "Samples: FluidR3_GM soundfont (acoustic_grand_piano, synth_drum), CC BY 3.0."
             );
-            println!("See ATTRIBUTION.md and DESIGN.md.");
+            println!("See README.md (Attribution) and DESIGN.md.");
             Ok(())
         }
     }

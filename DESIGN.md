@@ -102,7 +102,7 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
   `rodio::Source` voice-pool mixer (32 voices, velocity gains, 0.5 s release ramps, stereo
   pan option, zero alloc/locks/I/O in render) → WASAPI shared (128–256-frame request,
   fallback to default).
-- **Assets:** 37 notes (24 piano + 13 drum) FluidR3_GM OGGs (CC-BY 3.0, ATTRIBUTION.md),
+- **Assets:** 37 notes (24 piano + 13 drum) FluidR3_GM OGGs (CC-BY 3.0, README → Attribution),
   extracted from the base64 `.js` bundles (`scripts/extract-soundfonts.ps1`), symphonia-decoded,
   rubato-resampled at load. **No mechanical samples.**
   Piano notes: D4,E4,F4,G4,A4,Bb4,C5,D5,E5,F5,G5,A5,Bb5,C6,D6,E6,F6,G6,A6,Bb6,C7,D7,E7,F7

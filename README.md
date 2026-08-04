@@ -79,7 +79,7 @@ already-installed `aural` to start at login via the Windows Run key. See
 ## Building from source
 
 Requires a [Rust toolchain](https://rustup.rs) (stable). Sound samples are committed
-(see [`ATTRIBUTION.md`](ATTRIBUTION.md), CC BY 3.0 FluidR3_GM soundfont renderings), so a
+(see [Attribution](#attribution), CC BY 3.0 FluidR3_GM soundfont renderings), so a
 plain build is all you need:
 
 ```powershell
@@ -101,6 +101,33 @@ Quality gates (enforced by CI): `cargo fmt --check`, `cargo clippy --all-targets
 projects, the Rust/Swift/Go/Crystal/Zig language analysis, the latency architecture
 (lock-free SPSC ring → voice-pool mixer in the audio callback), and the decision register
 with explicit re-hash triggers.
+
+## Attribution
+
+### Sound samples
+
+The bundled instrument samples (`assets/soundfonts/piano/*.ogg`,
+`assets/soundfonts/drums/*.ogg`) are per-note renderings from the **FluidR3_GM**
+General MIDI soundfont:
+
+- Original Fluid R3 soundfont: Copyright &copy; 2000&ndash;2002, 2008 Frank Wen
+- Pre-rendered per-note samples: [gleitz/midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts),
+  released under [Creative Commons Attribution 3.0 Unported (CC BY 3.0)](https://creativecommons.org/licenses/by/3.0/)
+- Instruments used: `acoustic_grand_piano` (letters), `synth_drum` (all other keys)
+
+These are the same soundfont lineages used by the original
+[aural-coding](https://github.com/probablycorey/aural-coding) (Atom) and
+[aural-coding-vscode](https://github.com/jengjeng/aural-coding-vscode) projects,
+whose musical mapping this program faithfully ports.
+
+No mechanical-keyboard samples are used anywhere in this project, by design
+(see [`DESIGN.md`](DESIGN.md)).
+
+### Extraction
+
+The per-note OGGs are extracted from the upstream base64 `.js` bundles by
+[`scripts/extract-soundfonts.ps1`](scripts/extract-soundfonts.ps1) (kept for
+provenance/reproducibility; the bundles themselves are not committed).
 
 <!-- LICENSE/ -->
 
