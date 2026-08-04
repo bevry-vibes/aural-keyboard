@@ -33,3 +33,27 @@ jobs:
           files: |
             aural-windows-x64.zip
             aural-windows-x64.zip.sha256
+
+  macos:
+    runs-on: macos-latest # arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
+      - run: cargo build --release
+      - run: ./scripts/package-app.sh
+      - name: package binary + app (zip + sha256)
+        run: |
+          cd target/release
+          zip -j aural-macos-arm64.zip aural
+          ditto -c -k --keepParent Aural.app aural-macos-arm64-Aural.app.zip
+          shasum -a 256 aural-macos-arm64.zip > aural-macos-arm64.zip.sha256
+          shasum -a 256 aural-macos-arm64-Aural.app.zip > aural-macos-arm64-Aural.app.zip.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/release/aural-macos-arm64.zip
+            target/release/aural-macos-arm64.zip.sha256
+            target/release/aural-macos-arm64-Aural.app.zip
+            target/release/aural-macos-arm64-Aural.app.zip.sha256

@@ -47,6 +47,7 @@ pub const MAJOR_SCALE_NOTES: [u8; 52] = {
 
 pub const VK_BACK: u8 = 0x08;
 pub const VK_TAB: u8 = 0x09;
+pub const VK_RETURN: u8 = 0x0D;
 pub const VK_SHIFT: u8 = 0x10;
 pub const VK_CONTROL: u8 = 0x11;
 pub const VK_MENU: u8 = 0x12; // Alt
@@ -66,13 +67,69 @@ pub const VK_LCONTROL: u8 = 0xA2;
 pub const VK_RCONTROL: u8 = 0xA3;
 pub const VK_LMENU: u8 = 0xA4;
 pub const VK_RMENU: u8 = 0xA5;
+pub const VK_OEM_1: u8 = 0xBA; // ;/:
 pub const VK_OEM_PLUS: u8 = 0xBB; // =/+ key
+pub const VK_OEM_COMMA: u8 = 0xBC; // ,/<
+pub const VK_OEM_MINUS: u8 = 0xBD; // -/_
+pub const VK_OEM_2: u8 = 0xBF; // //?
+pub const VK_OEM_3: u8 = 0xC0; // `/~
 pub const VK_OEM_4: u8 = 0xDB; // [/{
+pub const VK_OEM_5: u8 = 0xDC; // \/|
 pub const VK_OEM_6: u8 = 0xDD; // ]/}
 pub const VK_OEM_7: u8 = 0xDE; // '/"
 pub const VK_OEM_PERIOD: u8 = 0xBE; // ./>
 
 /// Modifier keys are silent in the original (`key = null if key in ['meta','shift','control','alt']`).
+/// Map a text character to `(vk, shift)` for the stdin-driven test path
+/// (`aural run --stdin`). Letters/digits map to their US key; shifted
+/// punctuation returns `shift = true` so the caller can chord it (which also
+/// exercises the higher-register sounds, e.g. `!` → crash).
+pub fn vk_for_char(c: char) -> Option<(u8, bool)> {
+    let plain = |vk: u8| Some((vk, false));
+    let shifted = |vk: u8| Some((vk, true));
+    match c {
+        'a'..='z' => plain(c as u8 - b'a' + VK_A),
+        'A'..='Z' => shifted(c as u8 - b'A' + VK_A),
+        '0'..='9' => plain(c as u8 - b'0' + VK_0),
+        ' ' => plain(VK_SPACE),
+        '\t' => plain(VK_TAB),
+        ';' => plain(VK_OEM_1),
+        '=' => plain(VK_OEM_PLUS),
+        ',' => plain(VK_OEM_COMMA),
+        '-' => plain(VK_OEM_MINUS),
+        '.' => plain(VK_OEM_PERIOD),
+        '/' => plain(VK_OEM_2),
+        '`' => plain(VK_OEM_3),
+        '[' => plain(VK_OEM_4),
+        '\\' => plain(VK_OEM_5),
+        ']' => plain(VK_OEM_6),
+        '\'' => plain(VK_OEM_7),
+        // US shifted punctuation
+        '!' => shifted(b'1' - b'0' + VK_0),
+        '@' => shifted(b'2' - b'0' + VK_0),
+        '#' => shifted(b'3' - b'0' + VK_0),
+        '$' => shifted(b'4' - b'0' + VK_0),
+        '%' => shifted(b'5' - b'0' + VK_0),
+        '^' => shifted(b'6' - b'0' + VK_0),
+        '&' => shifted(b'7' - b'0' + VK_0),
+        '*' => shifted(b'8' - b'0' + VK_0),
+        '(' => shifted(b'9' - b'0' + VK_0),
+        ')' => shifted(VK_0),
+        '_' => shifted(VK_OEM_MINUS),
+        '+' => shifted(VK_OEM_PLUS),
+        '{' => shifted(VK_OEM_4),
+        '}' => shifted(VK_OEM_6),
+        '|' => shifted(VK_OEM_5),
+        ':' => shifted(VK_OEM_1),
+        '"' => shifted(VK_OEM_7),
+        '<' => shifted(VK_OEM_COMMA),
+        '>' => shifted(VK_OEM_PERIOD),
+        '?' => shifted(VK_OEM_2),
+        '~' => shifted(VK_OEM_3),
+        _ => None,
+    }
+}
+
 pub fn is_modifier(vk: u8) -> bool {
     matches!(
         vk,
@@ -169,6 +226,21 @@ mod tests {
         // The original wraps letters around 12 scale slots: 'm' == 'a', 'z' == 'b'.
         assert_eq!(note(0x4D, false).midi, 62);
         assert_eq!(note(VK_Z, false).midi, note(0x42, false).midi);
+    }
+
+    #[test]
+    fn chars_map_to_us_keys_with_shift_chords() {
+        assert_eq!(vk_for_char('a'), Some((VK_A, false)));
+        assert_eq!(vk_for_char('z'), Some((VK_Z, false)));
+        assert_eq!(vk_for_char('A'), Some((VK_A, true))); // shifted → higher register
+        assert_eq!(vk_for_char('5'), Some((0x35, false)));
+        assert_eq!(vk_for_char(' '), Some((VK_SPACE, false)));
+        assert_eq!(vk_for_char('!'), Some((0x31, true))); // shift+1 → crash
+        assert_eq!(vk_for_char('('), Some((VK_9, true)));
+        assert_eq!(vk_for_char(')'), Some((VK_0, true)));
+        assert_eq!(vk_for_char('.'), Some((VK_OEM_PERIOD, false)));
+        assert_eq!(vk_for_char('?'), Some((VK_OEM_2, true)));
+        assert_eq!(vk_for_char('€'), None); // unmapped chars are skipped
     }
 
     #[test]

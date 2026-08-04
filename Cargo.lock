@@ -90,6 +90,7 @@ dependencies = [
  "crossbeam-channel",
  "ctrlc",
  "dirs",
+ "libc",
  "serde",
  "serde_json",
  "symphonia",

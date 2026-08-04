@@ -20,6 +20,9 @@ enum Command {
     Run {
         #[arg(long, hide = true)]
         daemon: bool,
+        /// Read keys from stdin instead of the system hook (testing; no permissions needed)
+        #[arg(long)]
+        stdin: bool,
     },
     /// Start as a background daemon
     Start,
@@ -27,7 +30,7 @@ enum Command {
     Stop,
     /// Is the daemon running?
     Status,
-    /// Start automatically at login (Windows Run key)
+    /// Start automatically at login (Windows Run key / macOS LaunchAgent)
     Install,
     /// Remove from login autostart
     Uninstall,
@@ -53,9 +56,9 @@ enum Command {
 
 fn main() -> Result<()> {
     match Cli::parse().command {
-        Command::Run { daemon } => {
+        Command::Run { daemon, stdin } => {
             aural::engine::install_ctrlc();
-            aural::engine::run(daemon, None)
+            aural::engine::run(daemon, stdin, None)
         }
         Command::Start => aural::daemon::start(),
         Command::Stop => aural::daemon::stop(),
@@ -138,6 +141,19 @@ fn doctor() -> Result<()> {
         Ok(_) => println!("assets: 37 notes decode OK in {:?}", started.elapsed()),
         Err(e) => println!("assets: ERROR {e:#}"),
     }
+    #[cfg(windows)]
     println!("hook: WH_KEYBOARD_LL (installs on `aural run`; no admin required)");
+    #[cfg(target_os = "macos")]
+    {
+        if aural::hook::listen_access_granted() {
+            println!("hook: CGEventTap listen-only; Input Monitoring permission: granted");
+        } else {
+            println!(
+                "hook: CGEventTap listen-only; Input Monitoring permission: NOT granted\n  \
+                 → grant this binary (or your terminal) in System Settings →\n    \
+                 Privacy & Security → Input Monitoring, then run `aural run`."
+            );
+        }
+    }
     Ok(())
 }

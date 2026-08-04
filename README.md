@@ -27,9 +27,11 @@ immediately discarded — nothing is ever stored or sent anywhere.
 
 ### Status
 
-Windows 10 first (active development). macOS and Linux follow from the same codebase —
-see [`DESIGN.md`](DESIGN.md) for the full research, analysis, and decision register.
+Windows 10+ and **macOS (Apple Silicon)** are supported from one codebase — see
+[`DESIGN.md`](DESIGN.md) for the full research, analysis, and decision register.
+Linux is next, then feature work (sequencing in DESIGN.md §8).
 Live `bench` on Windows 10: **p50 5.5 ms / p95 9.4 ms** press→sound, under the 15 ms target.
+On macOS 26 (M1, CoreAudio, 128-frame buffer): synthetic bench **p50 1.4 ms / p95 2.6 ms**.
 
 ### Research
 
@@ -67,12 +69,15 @@ cd aural-system-keyboard
 cargo install --path .
 ```
 
-**Prebuilt binary:** download `aural-windows-x64.zip` (with sha256 sidecar) from
+**Prebuilt binary:** download `aural-windows-x64.zip` or `aural-macos-arm64.zip` /
+`aural-macos-arm64-Aural.app.zip` (each with a sha256 sidecar) from
 [Releases](https://github.com/bevry-labs/aural-system-keyboard/releases); CI also uploads
-`aural.exe` as the `aural-windows-x64` artifact on every green build (see the Actions tab).
+binaries as artifacts on every green build (see the Actions tab).
+macOS downloads carry the quarantine attribute — after unzipping, run
+`xattr -d com.apple.quarantine ./aural` (or on `Aural.app`) once.
 
 Note: the `aural install` *subcommand* is a different thing — it registers an
-already-installed `aural` to start at login via the Windows Run key. See
+already-installed `aural` to start at login (Windows Run key / macOS LaunchAgent). See
 [Usage](#usage).
 
 ### Building from source
@@ -89,21 +94,49 @@ target\release\aural.exe run
 ```
 
 On Windows both the MSVC and GNU host toolchains work; with the GNU toolchain, binutils
-(`dlltool`) must be on PATH for linking. macOS and Linux builds are not wired up yet
-(see [`DESIGN.md`](DESIGN.md)).
+(`dlltool`) must be on PATH for linking. On macOS (Apple Silicon), any recent stable
+toolchain works; see the next section for the one permission the OS requires. Linux
+builds are not wired up yet (see [`DESIGN.md`](DESIGN.md)).
 
 Quality gates (enforced by CI): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`.
+
+### macOS: Input Monitoring permission
+
+macOS gates keyboard capture behind System Settings → Privacy & Security → Input
+Monitoring. The prompt names the **responsible process** — the app macOS holds
+accountable — and the grant covers everything it runs:
+
+| How you run `aural` | Prompt names | Grant covers |
+|---|---|---|
+| `aural run` from a terminal | your terminal | every program that terminal runs |
+| `Aural.app/Contents/MacOS/aural run` | **Aural** | only aural |
+| `aural install` (LaunchAgent, at login) | **aural** | only the daemon binary |
+
+For per-app permission without installing anything, wrap the same binary as an app
+bundle and run its inner executable — still from your terminal, still no install:
+
+```sh
+cargo build --release
+./scripts/package-app.sh        # ad-hoc signs Aural.app (free, no Apple account)
+target/release/Aural.app/Contents/MacOS/aural run
+```
+
+Ad-hoc identity changes on every rebuild, so macOS re-prompts. For a stable local
+identity, create a self-signed code-signing certificate (Keychain Access → Certificate
+Assistant → Create a Certificate → Code Signing) and package with
+`AURAL_SIGN_IDENTITY="YourCert" ./scripts/package-app.sh`.
 
 ## Usage
 
 ```text
 aural run                  run the engine in the foreground (Ctrl+C to quit)
+aural run --stdin          read keys from stdin, not the OS hook (testing; no permissions)
 aural start                start as a background daemon
 aural stop                 stop the daemon
 aural status               is it running?
 aural mute | unmute | toggle
 aural volume 60            set volume (0-100)
-aural install              start automatically at login (Windows Run key)
+aural install              start automatically at login (Windows Run key / macOS LaunchAgent)
 aural uninstall
 aural bench                measure press→sound latency (p50/p95/p99)
 aural doctor               diagnostics: device, buffer, hook, assets

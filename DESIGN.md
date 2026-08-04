@@ -147,10 +147,264 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
 
 ## 8. Open items pending user feedback
 
+> **Sequencing (ruled 2026-08-04):** platform parity outranks feature work — the
+> macOS port, then the Linux port, ship before any of the feature items below
+> (mute-hotkey changes, musical variants, extras) are entertained. The ports
+> themselves change no behavior: existing defaults are carried over as-is.
+
 1. ~~**Commit co-author identity**~~ — resolved: `Co-authored-by: Cline - Kimi K3
    <cline-kimik3@local>` (per bevry `commits.md` known identities); used since the root
    commit.
 2. ~~Binary name `aural`~~ — confirmed by the user (2026-08-04); unchanged.
-3. Default global mute hotkey Ctrl+Shift+F12 — confirm or change.
+3. Default global mute hotkey Ctrl+Shift+F12 — confirm or change. **Frozen by the
+   sequencing note above:** the default stands unchanged through the macOS and Linux
+   ports (including on macOS, where F12 sits on the Fn layer by default); revisit after.
 4. Optional musical variants (off by default): "corrected" C-major scale option; stereo pan
-   by key column; velocity humanization (±small %).
+   by key column; velocity humanization (±small %). **Frozen by the sequencing note above.**
+   Same for layout-aware letters (macOS `UCKeyTranslate`, Windows `ToUnicodeEx`).
+
+## 9. macOS implementation notes (2026-08-04; macOS 26.6, M1 arm64)
+
+- **Hook** — `src/hook/macos.rs`: listen-only `CGEventTap` (`kCGHIDEventTap`,
+  head-insert, keyDown|keyUp|flagsChanged) on a dedicated `CFRunLoop` thread,
+  hand-rolled CoreGraphics/CoreFoundation FFI per D3. Tap is re-enabled on
+  `kCGEventTapDisabledByTimeout`; events always pass through (a listen-only tap
+  cannot block input, parity with the Windows LL hook). `HookHandle` owns the
+  run loop + thread; `stop` = `CFRunLoopStop`+`CFRunLoopWakeUp`+join (both
+  documented thread-safe).
+- **Key identity** — `src/keycodes.rs` translates positional CGKeyCodes to the
+  Windows VK identity `mapping.rs` consumes (unit-tested table; unknown codes
+  → `VK_UNKNOWN` 0xFF → default drum). Caveat: letters are US-assumed on macOS
+  too — layout-true characters (`UCKeyTranslate`) deferred with the Windows
+  `ToUnicodeEx` refinement (§8 item 4, frozen by sequencing).
+- **Shift/modifiers** arrive via `flagsChanged`; pressed state derived from
+  `CGEventFlags`. Caps lock is reconciled against the shared pressed table
+  (macOS only reports the "off" transition as a release). Held-key autorepeat
+  dedup happens in the shared pressed table, as on Windows.
+- **Mute hotkey** — detected in-tap (keycode + `CGEventFlags` modifier match);
+  no Carbon hotkey API. Default unchanged: Ctrl+Shift+F12 (on default MacBook
+  keyboards F12 sits on the Fn layer; configurable via `hotkey` in config.json).
+- **Permission model (TCC "responsible process")** — grants attach to the
+  responsible process, inherited from the spawner: terminal-launched runs are
+  attributed to the terminal; launchd-spawned and in-bundle executables get
+  their own identity. The private disown API is gone (probed 2026-08-04:
+  `responsibility_spawnattrs_setdisown` is absent from macOS 26 — only the
+  query call survives), so bundle/launchd are the only per-app routes.
+  Manually adding the binary in System Settings is inert: the responsible
+  process, not the caller, is evaluated. `scripts/package-app.sh` wraps the
+  same binary as `Aural.app` (ad-hoc signed; `AURAL_SIGN_IDENTITY` for a
+  self-signed cert) — running its inner binary from a terminal attributes the
+  prompt to "Aural". Ad-hoc identity is per-build, so rebuilds re-prompt.
+  SDK rename: the macOS 26 SDK renamed `CGPreflightListenEventTapAccess` →
+  `CGPreflightListenEventAccess` (same for Request…); we use the new names.
+  Note: with a permission dialog pending, `CGEventTapCreate` blocks until the
+  user answers — expected TCC behavior, not a hang.
+- **Daemon** — `src/daemon/unix.rs`: `pre_exec(setsid)` detach, stdio →
+  `aural.log` at spawn, `kill(pid, 0/SIGTERM)` for status/stop, `flock`
+  single-instance (`aural.lock`, auto-released on exit), LaunchAgent plist
+  (`~/Library/LaunchAgents/com.bevry.aural.plist`, RunAtLoad) for
+  install/uninstall — parity with the Windows Run key (starts at login, not
+  immediately).
+- **Audio** — cpal 0.18 CoreAudio backend, engine code unchanged. The
+  128-frame buffer request succeeds on CoreAudio ("buffer 128 frames
+  (requested)"). Synthetic bench on M1 @ 48 kHz: **p50 1.36 ms / p95 2.64 ms**
+  (Windows comparison from 2026-08-04: p50 5.5 / p95 9.4 on WASAPI shared).
+- **Toolchain** — the lockfile (symphonia 0.6, edition-2024) requires
+  rustc/cargo ≥ 1.85; CI uses current stable. New direct dep: `libc`
+  (unix-only; was already in the tree transitively).
+
+## 10. macOS bring-up state (2026-08-04 evening; rate-limit checkpoint)
+
+### Working
+- Full port compiles/gates green: fmt, clippy `-D warnings`, 22 tests,
+  release build, `doctor`, synthetic bench (p50 1.2 ms).
+- **`aural run --stdin`** (new, this session): chars from stdin become key
+  presses (`mapping::vk_for_char`; uppercase/shifted punct sent as shift
+  chords; Enter = Return; EOF stops engine). No hook, **no permissions** —
+  proven end-to-end: `printf 'Hello World! (123)\n' | AURAL_LOG=1 aural run
+  --stdin` maps every char correctly and exits 0. Paths:
+  `/Users/balupton/.cargo/target/release/aural` (naked) and
+  `.../Aural.app/Contents/MacOS/aural` (bundled, same binary).
+- Daemon lifecycle, single-instance (flock), LaunchAgent install, bundle
+  packaging (`scripts/package-app.sh`, ad-hoc; `AURAL_SIGN_IDENTITY` override).
+
+### BLOCKER: event tap receives zero events
+Symptom: preflight = **granted**, tap created, run loop running, process
+launched via LaunchServices **after** the grant — yet live bench reports
+`no samples collected` and no keys log. Engine/audio proven fine via stdin
+mode. Root cause unknown; diagnostics queued below.
+
+### TCC/macOS learnings (hard-won, all verified this session)
+1. Responsible-process inheritance decides attribution; **bundle context alone
+   does NOT** — tccd `AUTHREQ_ATTRIBUTION` showed `responsible=com.mitchellh.
+   ghostty` for the bundled binary exec'd from a terminal. Only **launchd**
+   (LaunchAgent) or **LaunchServices** (`open Aural.app --args …`) break
+   inheritance. (README table row for the bundle MUST be corrected — see
+   pending docs.)
+2. macOS 26: `CGEventTapCreate` **succeeds-but-deaf** without permission → we
+   gate on `CGPreflightListenEventAccess()` before creating the tap.
+3. `CGRequestListenEventAccess()` only presents its prompt **while the
+   requester is alive** → spawn waits (500 ms poll, 5 min cap) instead of
+   fail-fast; continues automatically on grant.
+4. A pending prompt for the same responsible process **suppresses** further
+   prompts (why nothing re-appeared for Ghostty).
+5. Grant dialog has only "Open System Settings"/Deny → user toggles →
+   "**Quit & Reopen**" required for the grant to take effect on a running app.
+6. **Ad-hoc cdhash changes every rebuild → re-grant every rebuild.** Fix:
+   self-signed cert (Keychain Access → Certificate Assistant → Create a
+   Certificate → Self-Signed Root / Code Signing, e.g. `aural-dev`), then
+   `AURAL_SIGN_IDENTITY="aural-dev" ./scripts/package-app.sh`. Offered to
+   user; pending their choice.
+7. `doctor`'s permission line reflects the *responsible* process (terminal
+   when run from a terminal) — not aural's bundle identity. Needs a doc
+   caveat (or future responsible-process display).
+8. Private `responsibility_spawnattrs_setdisown` is **removed** in macOS 26
+   (probed). Manual Settings add of a naked binary is inert (responsible
+   process is evaluated, not the caller).
+9. Multiple stale "Aural" TCC entries can accumulate across rebuilds;
+   Settings toggle must match the *current* build's identity.
+
+### Next steps (in order)
+1. User verifies `run --stdin` interactively (audible engine proof).
+2. Optional: create `aural-dev` self-signed cert; repackage with it.
+3. Re-grant Aural (Settings → Input Monitoring) for the CURRENT build.
+4. Tap debug: `launchctl setenv AURAL_LOG 1`, then
+   `open --stdout /tmp/bench.out --stderr /tmp/bench.err …/Aural.app --args bench`,
+   user types, `kill -INT <pid>`, read files (`launchctl unsetenv AURAL_LOG`
+   after). Callback now logs `tap event type N` (AURAL_LOG) at entry:
+   - **No tap lines** → delivery never fires: try `kCGSessionEventTap`(1)
+     instead of `kCGHIDEventTap`(0); inspect SkyLight logs
+     (`log show --last 5m | grep -i skylight`); diff against known-good
+     KeyEcho/TickeysRedux recipes.
+   - **Tap lines, no samples** → bug in our callback/handle_key path.
+5. Pending doc fixes: README permission table (bundle row = `open Aural.app
+   --args run --daemon`, quit&reopen step, doctor caveat), README usage line
+   for `--stdin`, DESIGN §9 corrections matching learning #1.
+6. Live bench numbers into README/DESIGN; then **commit** everything
+   (co-author trailer `Co-authored-by: Cline - Kimi K3 <cline-kimik3@local>`
+   per §8.1). Uncommitted work tree currently holds the whole macOS port.
+
+### Late-evening update: signing solved; deaf-tap root cause found (Secure Event Input)
+
+**Codesigning — permanently fixed (dev machine):**
+- Created self-signed `aural-dev` code-signing cert via openssl: `-addext` silently drops
+  keyUsage/EKU with `req -x509` (only basicConstraints applied) — use a `-config` file with
+  `x509_extensions` (CA:TRUE, digitalSignature, codeSigning EKU, SKID/AKID).
+- p12 import needs `openssl pkcs12 -export -legacy` (macOS SecKeychainItemImport rejects the
+  default AES MAC: "MAC verification failed").
+- `security find-identity -v -p codesigning` does NOT list the self-signed identity, but
+  `codesign -s aural-dev` resolves it fine — trust codesign, not find-identity.
+- First `codesign` per imported key item prompts "codesign wants to access key aural-dev" →
+  **Always Allow** (key was imported twice → two prompts, one each). Silent thereafter.
+  This is dev-machine-only UX; end users never sign anything.
+- `AURAL_SIGN_IDENTITY=aural-dev ./scripts/package-app.sh` → designated requirement
+  `identifier "com.bevry.aural" and certificate leaf = H"61de87…"` — **stable across rebuilds,
+  so the TCC grant now survives rebuilds**. Iteration is free again.
+
+**TCC grant mechanics (verified against tccd logs):**
+- A stale ad-hoc-era grant blocks a new cert requirement:
+  `log show --predicate 'subsystem == "com.apple.TCC"'` shows
+  "Failed to match existing code requirement … certificate leaf = H"…"".
+- Fix: `tccutil reset ListenEvent com.bevry.aural`, relaunch → fresh modal prompt → enable
+  toggle → **quit & reopen is mandatory**: preflight does NOT flip live for an already-running
+  process (our 5-min wait-for-grant poll only helps when the grant is made before/between
+  launches; after a Settings toggle the process must be relaunched). Adjust UX expectations
+  accordingly; the wait loop is still useful for the first-run prompt race.
+
+**Tap itself verified working:** callbacks fire; keycode table correct
+(60→0xa1 RShift, 55→0x5b LCmd). TEMP-DIAG unconditional first-10 callback prints + a
+secure-input startup check were added in `hook/macos.rs` (remove/gate before commit).
+
+**CURRENT BLOCKER — Secure Event Input:**
+`IsSecureEventInputEnabled()` returns **True globally**. While any app holds secure input,
+macOS withholds keyDown/keyUp from ALL event taps system-wide; only FlagsChanged (modifier)
+events leak through — exactly matches observations (10/10 callbacks were type=12 despite
+typing letters in many apps; zero type=10/11).
+- 1Password fully killed (`pkill -f 1Password`, incl. login-item helpers) → still True.
+- Suspects still running: Ghostty (our host terminal — v1.1+ auto-enables secure input on
+  password prompts and it can stick if something died mid-prompt; menu Ghostty → Secure Input
+  toggles it), Terminal.app (Secure Keyboard Entry menu item), browsers with a stuck WebKit
+  password field (Vivaldi/Orion), wox/Alfred-style launchers.
+- Probe (no build needed):
+  `python3 -c "import ctypes; lib=ctypes.CDLL('/System/Library/Frameworks/Carbon.framework/Frameworks/HIToolbox.framework/HIToolbox'); f=lib.IsSecureEventInputEnabled; f.restype=ctypes.c_bool; print(f())"`
+- **macOS 26 path change:** HIToolbox now lives at
+  `/System/Library/Frameworks/Carbon.framework/Frameworks/HIToolbox.framework/`; the old
+  ApplicationServices subframework path is gone (not even in the dyld cache). The in-app diag
+  used the old path and printed nothing — fix to the Carbon path when touching macos.rs.
+- Bisect plan: toggle Ghostty's Secure Input (don't quit Ghostty — the agent runs inside it),
+  uncheck Terminal.app's Secure Keyboard Entry, then quit browsers one at a time, probing
+  after each. Once False, letters should play immediately (tap+grant already proven).
+
+## 11. macOS project survey (2026-08-04; github.com/stars/balupton/lists/keyboard-sounds)
+
+How the working macOS keyboard-sound apps capture keys, versus our approach:
+
+| Project | Lang | Capture | Tap point | Options | Run loop | Autorepeat |
+|---|---|---|---|---|---|---|
+| thock (860★) | Swift | CGEventTap | HID, **tail-append** | **defaultTap** (swallows events in "cleaning mode") | current + commonModes | dedup via pressedKeys |
+| keesound | Swift | CGEventTap | **session**, head-insert | listenOnly | **main** + commonModes | **not filtered** (tracks on-screen chars) |
+| TickeysRedux | Rust | CGEventTap | HID, head-insert | listenOnly, keyDown-only mask | current + commonModes | n/a (keyDown only) |
+| KeyEcho (850★) | Rust | rdev → CGEventTap | (rdev default) | listen | rdev thread | filtered |
+| Mechvibes et al | JS | iohook/global-listener | — | — | — | — |
+
+**Every one of them uses CGEventTap-style capture; none detect or handle Secure Event
+Input.** Our implementation (HID, head-insert, listen-only, dedicated thread) is equivalent.
+
+Corroborating thock issues (proof the blackout is environmental, not our bug):
+- **#127 "ONLY function keys work on mac"** (open, 2026-06): "works perfectly when I start…
+  but after that only command shift capslock option control and fn work, others have no
+  sounds" — **identical to our symptom** (flagsChanged flow, keyDown/Up withheld). Same root
+  cause as ours: secure input enabled mid-session by some app.
+- #114 "app not working on Tahoe 26.4.1" (open): 1.23.0 silent for several users, "downgrade
+  to 1.22.0 works" — possibly a thock-1.23 regression, possibly the same class of issue.
+
+Adopted from the survey (queued, post-bring-up): `kCFRunLoopCommonModes` instead of
+DefaultMode (all three); `CGEventTapIsEnabled` post-enable assertion (TickeysRedux). We keep:
+disabled→re-enable (thock merely stops), autorepeat filter (aural parity; keesound's
+unfiltered choice noted as a possible future config), keycode logging gated behind AURAL_LOG
+(keesound's "classify in-callback, keycode never escapes" pattern noted; the TEMP-DIAG prints
+must be removed before commit). TickeysRedux's README independently documents the ad-hoc
+regrant caveat and the Developer-ID fix — validates our cert approach.
+
+**Karabiner-Elements** (installed+enabled on the dev machine, do-not-modify): grabs physical
+keyboards and re-injects via its DriverKit virtual HID device; taps then observe the
+re-injected stream. This coexists fine with all surveyed apps and with ours (the modifier
+events we receive arrive through that path). Karabiner does **not** set the secure-input flag,
+so it is not the deafness cause; per Apple docs, when secure input IS active even Karabiner
+itself can't see keystrokes. No Karabiner changes made or needed.
+
+Caps Lock datum (user-observed): Caps Lock plays a sound, letters don't. Caps Lock arrives as
+flagsChanged (type 12) — which macOS still delivers to taps during secure input — while
+letter keyDown/Up (type 10/11) are withheld. Direct live confirmation of the diagnosis.
+
+
+**Research task handed off:** compare capture approaches of the macOS projects in
+https://github.com/stars/balupton/lists/keyboard-sounds (thock, TickeysRedux, KeyEcho,
+TypeTock, keesound, kutuk, MKSTE…) — tap location, permission model, and whether/how they
+detect or document the secure-input blackout.
+
+
+### End-of-session state (2026-08-04 night; machine restart planned)
+
+- All aural processes stopped. Secure input was **still True** at session end; the holding
+  app was not yet identified. Eliminated: 1Password (killed, incl. helpers — flag stayed True).
+  Not yet tested: Terminal.app (Secure Keyboard Entry toggle), Ghostty (host terminal; check
+  its app menu for a Secure Input item — do NOT quit it while the agent runs), Keychain
+  Access, Vivaldi/Orion (stuck WebKit password field), wox/Alfred/Adguard, mail/chat apps.
+- Instrumented build in place: diag prints first 50 tap callbacks (type/keycode/vk) +
+  startup `IsSecureEventInputEnabled` print (correct Carbon path). Grant persists across the
+  restart (cert-signed, requirement = certificate leaf hash) — no re-grant needed.
+
+**Post-restart test plan (ordered):**
+1. Restart clears the secure-input flag. Open **only Ghostty** (needed for the agent), then:
+   `open --stdout /tmp/bench.out --stderr /tmp/bench.err ~/.cargo/target/release/Aural.app --args bench`
+   The log prints `IsSecureEventInputEnabled = false` if clear. Type letters → expect sound.
+   If letters work with Ghostty running, Ghostty is exonerated; if not, Ghostty is prime suspect.
+2. If clear: open remaining apps **one at a time**, typing a few letters after each
+   (Terminal.app, Keychain Access, Vivaldi, Orion, 1Password, Signal/WhatsApp/Discord,
+   thunderbird, Mail…). When letters go silent (`IsSecureEventInputEnabled` flips true), the
+   last-opened app is the securer → disable its secure-entry feature or avoid it.
+3. Once letters play: remove the TEMP-DIAG block from `hook/macos.rs`, adopt
+   `kCFRunLoopCommonModes` + `CGEventTapIsEnabled` assertion (§11), capture live-bench
+   latency numbers for the docs, then commit (tree intentionally uncommitted all session).
+
