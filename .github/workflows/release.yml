@@ -16,6 +16,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test
       - run: cargo build --release
+      # publish before packaging: cargo publish requires a clean working tree,
+      # and the zip artifacts written below would dirty it
+      - name: publish to crates.io
+        run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - name: package binary (zip + sha256)
         shell: pwsh
         run: |
@@ -27,7 +33,3 @@ jobs:
           files: |
             aural-windows-x64.zip
             aural-windows-x64.zip.sha256
-      - name: publish to crates.io
-        run: cargo publish --token $env:CARGO_REGISTRY_TOKEN
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
