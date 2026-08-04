@@ -7,33 +7,7 @@ onto the OS, with a real-time, game-audio-grade engine. Letters play grand-piano
 scale (shift = higher register); every other key plays synth-drum percussion (space thumps
 quietly, backspace cracks, `!` crashes). No mechanical-keyboard sounds, by design.
 
-CLI only. No UI, no telemetry, no network. Keystrokes are mapped to notes in memory and
-immediately discarded — nothing is ever stored or sent anywhere.
-
-## Status
-
-Windows 10 first (active development). macOS and Linux follow from the same codebase —
-see [`DESIGN.md`](DESIGN.md) for the full research, analysis, and decision register.
-
-## Usage
-
-```text
-aural run                  run the engine in the foreground (Ctrl+C to quit)
-aural start                start as a background daemon
-aural stop                 stop the daemon
-aural status               is it running?
-aural mute | unmute | toggle
-aural volume 60            set volume (0-100)
-aural install              start automatically at login (Windows Run key)
-aural uninstall
-aural bench                measure press→sound latency (p50/p95/p99)
-aural doctor               diagnostics: device, buffer, hook, assets
-aural about                version + sound attribution
-```
-
-Global mute hotkey: **Ctrl+Shift+F12** (configurable).
-
-## How it sounds
+**How it sounds:**
 
 | Key | Sound |
 |---|---|
@@ -47,7 +21,26 @@ Global mute hotkey: **Ctrl+Shift+F12** (configurable).
 
 Key release applies the original 0.5 s fade-out, so melodies ring naturally as you type.
 
-## Install
+CLI only. No UI, no telemetry, no network. Keystrokes are mapped to notes in memory and
+immediately discarded — nothing is ever stored or sent anywhere.
+
+## Design
+
+### Status
+
+Windows 10 first (active development). macOS and Linux follow from the same codebase —
+see [`DESIGN.md`](DESIGN.md) for the full research, analysis, and decision register.
+
+### Research
+
+[`DESIGN.md`](DESIGN.md) documents the original goal, the evaluation of all 23 reference
+projects, the Rust/Swift/Go/Crystal/Zig language analysis, the latency architecture
+(lock-free SPSC ring → voice-pool mixer in the audio callback), and the decision register
+with explicit re-hash triggers.
+
+## Setup
+
+### Install
 
 The binary is named `aural`. Requires a [Rust toolchain](https://rustup.rs) (stable) —
 `cargo install` places `aural.exe` in `%USERPROFILE%\.cargo\bin`, which rustup puts on
@@ -76,7 +69,7 @@ Note: the `aural install` *subcommand* is a different thing — it registers an
 already-installed `aural` to start at login via the Windows Run key. See
 [Usage](#usage).
 
-## Building from source
+### Building from source
 
 Requires a [Rust toolchain](https://rustup.rs) (stable). Sound samples are committed
 (see [Attribution](#attribution), CC BY 3.0 FluidR3_GM soundfont renderings), so a
@@ -95,12 +88,23 @@ On Windows both the MSVC and GNU host toolchains work; with the GNU toolchain, b
 
 Quality gates (enforced by CI): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`.
 
-## Design & research
+## Usage
 
-[`DESIGN.md`](DESIGN.md) documents the original goal, the evaluation of all 23 reference
-projects, the Rust/Swift/Go/Crystal/Zig language analysis, the latency architecture
-(lock-free SPSC ring → voice-pool mixer in the audio callback), and the decision register
-with explicit re-hash triggers.
+```text
+aural run                  run the engine in the foreground (Ctrl+C to quit)
+aural start                start as a background daemon
+aural stop                 stop the daemon
+aural status               is it running?
+aural mute | unmute | toggle
+aural volume 60            set volume (0-100)
+aural install              start automatically at login (Windows Run key)
+aural uninstall
+aural bench                measure press→sound latency (p50/p95/p99)
+aural doctor               diagnostics: device, buffer, hook, assets
+aural about                version + sound attribution
+```
+
+Global mute hotkey: **Ctrl+Shift+F12** (configurable).
 
 ## Attribution
 
