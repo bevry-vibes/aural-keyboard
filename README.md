@@ -1,8 +1,7 @@
 # aural-system-keyboard (`aural`)
 
 System-wide **melodic** keyboard sounds for Windows, macOS, and Linux — a faithful port of
-[aural-coding](https://github.com/probablycorey/aural-coding) (Atom) /
-[aural-coding-vscode](https://github.com/jengjeng/aural-coding-vscode) out of the editor and
+[aural-coding](https://github.com/probablycorey/aural-coding) (Atom) out of the editor and
 onto the OS, with a real-time, game-audio-grade engine. Letters play grand-piano notes in a
 scale (shift = higher register); every other key plays synth-drum percussion (space thumps
 quietly, backspace cracks, `!` crashes). No mechanical-keyboard sounds, by design.
@@ -131,8 +130,7 @@ General MIDI soundfont:
 - Instruments used: `acoustic_grand_piano` (letters), `synth_drum` (all other keys)
 
 These are the same soundfont lineages used by the original
-[aural-coding](https://github.com/probablycorey/aural-coding) (Atom) and
-[aural-coding-vscode](https://github.com/jengjeng/aural-coding-vscode) projects,
+[aural-coding](https://github.com/probablycorey/aural-coding) (Atom) project,
 whose musical mapping this program faithfully ports.
 
 No mechanical-keyboard samples are used anywhere in this project, by design
