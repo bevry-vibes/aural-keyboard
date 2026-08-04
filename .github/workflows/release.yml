@@ -1,0 +1,33 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
+      - run: cargo build --release
+      - name: package binary (zip + sha256)
+        shell: pwsh
+        run: |
+          Compress-Archive target/release/aural.exe aural-windows-x64.zip
+          $h = (Get-FileHash aural-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
+          [System.IO.File]::WriteAllText("$PWD/aural-windows-x64.zip.sha256", "$h  aural-windows-x64.zip`n")
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            aural-windows-x64.zip
+            aural-windows-x64.zip.sha256
+      - name: publish to crates.io
+        run: cargo publish --token $env:CARGO_REGISTRY_TOKEN
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

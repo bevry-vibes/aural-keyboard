@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "System-wide melodic keyboard sounds: piano for letters, drums for everything else (a port of aural-coding to the OS)"
 repository = "https://github.com/bevry-labs/aural-system-keyboard"
+homepage = "https://github.com/bevry-labs/aural-system-keyboard"
 license = "RPL-1.5"
+keywords = ["keyboard", "audio", "sound", "midi", "typing"]
+categories = ["command-line-utilities", "multimedia::audio"]
 
 [dependencies]
 anyhow = "1"
