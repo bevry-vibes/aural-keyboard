@@ -108,6 +108,16 @@ Global mute hotkey: **Ctrl+Shift+F12** (configurable).
 
 ## Attribution
 
+### aural-coding (the original)
+
+This project exists because of [aural-coding](https://github.com/probablycorey/aural-coding),
+created by [Corey Johnson](https://github.com/probablycorey) with
+[Kevin Sawicki](https://github.com/kevinsawicki) back in 2013, for the Atom editor. Its
+musical mapping — letters walking up a scale on grand piano (shift = higher register),
+synth-drum percussion for every other key, the velocity choices, the 0.5 s release fade —
+is the foundation this engine faithfully ports to the OS level. Without that original
+innovation, this project would never have happened.
+
 ### Sound samples
 
 The bundled instrument samples (`assets/soundfonts/piano/*.ogg`,
