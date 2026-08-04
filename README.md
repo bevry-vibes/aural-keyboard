@@ -33,8 +33,9 @@ Live `bench` on Windows 10: **p50 5.5 ms / p95 9.4 ms** press→sound, under the
 
 ### Research
 
-[`DESIGN.md`](DESIGN.md) documents the original goal, the evaluation of all 23 reference
-projects, the Rust/Swift/Go/Crystal/Zig language analysis, the latency architecture
+[`DESIGN.md`](DESIGN.md) documents the original goal, the evaluation of all [23 reference
+projects](https://github.com/stars/balupton/lists/keyboard-sounds), the
+Rust/Swift/Go/Crystal/Zig language analysis, the latency architecture
 (lock-free SPSC ring → voice-pool mixer in the audio callback), and the decision register
 with explicit re-hash triggers.
 

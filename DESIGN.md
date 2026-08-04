@@ -41,7 +41,7 @@ envelopes), faithfully porting the aural-coding musical logic out of the editor 
 onto the OS. Windows 10 first. Success = typing anywhere feels like the Atom extension
 (< ~15 ms p95 press→sound), with zero UI.
 
-## 3. Design research (23 starred projects, all evaluated)
+## 3. Design research ([23 starred projects](https://github.com/stars/balupton/lists/keyboard-sounds), all evaluated)
 
 **The two aural sources (musical logic — ported verbatim):**
 
