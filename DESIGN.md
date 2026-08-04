@@ -147,10 +147,10 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
 
 ## 8. Open items pending user feedback
 
-1. **Commit co-author identity**: bevry `commits.md` requires `Co-authored-by: <harness> - <model>`
-   on agent commits; harness = Cline (env-confirmed), **model is not disclosed to the
-   harness** — commits are held until the model identity is confirmed.
-2. Binary name `aural` — confirm or change before first release packaging.
+1. ~~**Commit co-author identity**~~ — resolved: `Co-authored-by: Cline - Kimi K3
+   <cline-kimik3@local>` (per bevry `commits.md` known identities); used since the root
+   commit.
+2. ~~Binary name `aural`~~ — confirmed by the user (2026-08-04); unchanged.
 3. Default global mute hotkey Ctrl+Shift+F12 — confirm or change.
 4. Optional musical variants (off by default): "corrected" C-major scale option; stereo pan
    by key column; velocity humanization (±small %).

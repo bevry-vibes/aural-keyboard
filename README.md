@@ -47,15 +47,53 @@ Global mute hotkey: **Ctrl+Shift+F12** (configurable).
 
 Key release applies the original 0.5 s fade-out, so melodies ring naturally as you type.
 
+## Install
+
+The binary is named `aural`. Requires a [Rust toolchain](https://rustup.rs) (stable) —
+`cargo install` places `aural.exe` in `%USERPROFILE%\.cargo\bin`, which rustup puts on
+your PATH.
+
+**Straight from the repo (no clone needed):**
+
+```powershell
+cargo install --git https://github.com/bevry-labs/aural-system-keyboard
+```
+
+**From a local clone:**
+
+```powershell
+git clone https://github.com/bevry-labs/aural-system-keyboard
+cd aural-system-keyboard
+cargo install --path .
+```
+
+**From crates.io:** planned for the first tagged release (`cargo install aural`).
+
+**Prebuilt binary:** CI uploads `aural.exe` as the `aural-windows-x64` artifact on every
+green build (see the Actions tab); versioned GitHub Releases (zip + sha256) start at v0.1.0.
+
+Note: the `aural install` *subcommand* is a different thing — it registers an
+already-installed `aural` to start at login via the Windows Run key. See
+[Usage](#usage).
+
 ## Building from source
 
 Requires a [Rust toolchain](https://rustup.rs) (stable). Sound samples are committed
-(see [`ATTRIBUTION.md`](ATTRIBUTION.md), CC BY 3.0 FluidR3_GM soundfont renderings).
+(see [`ATTRIBUTION.md`](ATTRIBUTION.md), CC BY 3.0 FluidR3_GM soundfont renderings), so a
+plain build is all you need:
 
 ```powershell
+git clone https://github.com/bevry-labs/aural-system-keyboard
+cd aural-system-keyboard
 cargo build --release
 target\release\aural.exe run
 ```
+
+On Windows both the MSVC and GNU host toolchains work; with the GNU toolchain, binutils
+(`dlltool`) must be on PATH for linking. macOS and Linux builds are not wired up yet
+(see [`DESIGN.md`](DESIGN.md)).
+
+Quality gates (enforced by CI): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`.
 
 ## Design & research
 
