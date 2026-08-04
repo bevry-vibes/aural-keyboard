@@ -47,6 +47,12 @@ The binary is named `aural`. Requires a [Rust toolchain](https://rustup.rs) (sta
 `cargo install` places `aural.exe` in `%USERPROFILE%\.cargo\bin`, which rustup puts on
 your PATH.
 
+**From crates.io:**
+
+```powershell
+cargo install aural
+```
+
 **Straight from the repo (no clone needed):**
 
 ```powershell
@@ -61,10 +67,9 @@ cd aural-system-keyboard
 cargo install --path .
 ```
 
-**From crates.io:** planned for the first tagged release (`cargo install aural`).
-
-**Prebuilt binary:** CI uploads `aural.exe` as the `aural-windows-x64` artifact on every
-green build (see the Actions tab); versioned GitHub Releases (zip + sha256) start at v0.1.0.
+**Prebuilt binary:** download `aural-windows-x64.zip` (with sha256 sidecar) from
+[Releases](https://github.com/bevry-labs/aural-system-keyboard/releases); CI also uploads
+`aural.exe` as the `aural-windows-x64` artifact on every green build (see the Actions tab).
 
 Note: the `aural install` *subcommand* is a different thing — it registers an
 already-installed `aural` to start at login via the Windows Run key. See
