@@ -115,7 +115,7 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
   `volume`, `bench` (p50/p95/p99 hook→mix), `doctor`, `about`.
 - **Quality:** mapping unit tests vs. derived test vectors; mixer tests (envelope ±1
   sample; no-alloc proof); CI fmt/clippy/test/build; release = zip + sha256.
-- **Targets:** p95 < 15 ms press→sound (`bench`-verified); CPU ~0% idle; clean device-loss
+- **Targets:** p95 < 15 ms press→sound (`bench`-verified 2026-08-04: p50 5.5, p95 9.4, p99 9.6, max 9.8 ms; n=212, 128-frame buffer @ 48 kHz, Windows 10); CPU ~0% idle; clean device-loss
   recovery (KeyEcho-documented rodio/cpal pitfall).
 
 ## 6. Considerations & known limitations
@@ -140,7 +140,7 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
 | D2 | rodio hosts output | Device-change bugs persist (→ raw cpal + own stream mgmt, kira, or miniaudio-sys) |
 | D3 | Native `windows`-crate hooks (not rdev) | Maintaining 3 native backends exceeds rdev's quirk cost (→ consolidate on rdev) |
 | D4 | Verbatim mapping incl. Mixolydian filter | Only with user-facing musical reason; the formula is the spec, "C major" comment is not |
-| D5 | WASAPI shared mode | `bench` shows p95 > 15 ms AND users perceive lag (→ exclusive mode via windows-rs) |
+| D5 | WASAPI shared mode | `bench` shows p95 > 15 ms AND users perceive lag (→ exclusive mode via windows-rs); tested 2026-08-04: p95 9.4 ms, stands |
 | D6 | SPSC ring + voice-pool mixer | Load-bearing, TypeTock-validated; revisit only with bench evidence |
 | D7 | FluidR3_GM OGG assets (CC-BY) | Licensing concern (→ synth mode / own recordings); RAM pressure (→ mono/downsample) |
 | D8 | CLI-only | A GUI is requested — engine is shell-agnostic by design; add tray/GUI without touching it |

@@ -30,6 +30,7 @@ immediately discarded — nothing is ever stored or sent anywhere.
 
 Windows 10 first (active development). macOS and Linux follow from the same codebase —
 see [`DESIGN.md`](DESIGN.md) for the full research, analysis, and decision register.
+Live `bench` on Windows 10: **p50 5.5 ms / p95 9.4 ms** press→sound, under the 15 ms target.
 
 ### Research
 
