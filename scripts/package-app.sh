@@ -44,6 +44,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <string>Aural</string>
     <key>CFBundleExecutable</key>
     <string>aural</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.bevry.aural</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -63,6 +65,9 @@ cat > "$APP/Contents/Info.plist" <<EOF
 </dict>
 </plist>
 EOF
+
+mkdir -p "$APP/Contents/Resources"
+cp "$ROOT/assets/aural-icon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 IDENTITY=${AURAL_SIGN_IDENTITY:--} # "-" = ad-hoc
 codesign --force --sign "$IDENTITY" "$APP"
