@@ -190,6 +190,9 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
   their own identity. The private disown API is gone (probed 2026-08-04:
   `responsibility_spawnattrs_setdisown` is absent from macOS 26 — only the
   query call survives), so bundle/launchd are the only per-app routes.
+  **Superseded 2026-08-29** by the self-disclaim mechanism (§10, below): the
+  still-present private symbol `responsibility_spawnattrs_setdisclaim` re-execs
+  aural as its own responsible process, so plain `aural run` names aural too.
   Manually adding the binary in System Settings is inert: the responsible
   process, not the caller, is evaluated. `scripts/package-app.sh` wraps the
   same binary as `Aural.app` (ad-hoc signed; `AURAL_SIGN_IDENTITY` for a
@@ -407,4 +410,56 @@ detect or document the secure-input blackout.
 3. Once letters play: remove the TEMP-DIAG block from `hook/macos.rs`, adopt
    `kCFRunLoopCommonModes` + `CGEventTapIsEnabled` assertion (§11), capture live-bench
    latency numbers for the docs, then commit (tree intentionally uncommitted all session).
+
+### Bring-up complete (2026-08-29) — secure input root-caused, self-disclaim resolves attribution
+
+**Secure Event Input — root cause found and fixed.** `ioreg -n Root -d1 -a`
+showed `kCGSSessionSecureInputPID = 944` = **Terminal.app**, launched at boot by
+launchd with its `SecureKeyboardEntry = true`. While any app holds secure input,
+macOS 26 withholds `keyDown`/`keyUp` from **all** event taps system-wide; only
+`flagsChanged` (modifiers/Caps Lock) leaks through — exactly the "Caps Lock
+sounds, letters don't" symptom. Ghostty (the host terminal) was exonerated; its
+toggle had no effect because it never held the flag (it can re-hold later via
+`macos-auto-secure-input` on password prompts, ghostty#11883). Fix: uncheck
+Terminal.app → Shell → Secure Keyboard Entry. Verified
+`IsSecureEventInputEnabled = False`. **Restart does NOT clear the flag**
+(disproving the post-restart assumption above). Not a freak thing — thock#127
+and ghostty#11883 document the same blackout, so we codified detection in
+`aural doctor` (names the holder via `kCGSSessionSecureInputPID` → `ps`) and
+left the workaround instructions there.
+
+**TCC attribution solved via self-disclaim.** The correct private API is
+**`responsibility_spawnattrs_setdisclaim`** — present in libSystem on macOS 26
+(verified via dlsym), the documented mechanism Terminal.app/iTerm2 use, still
+honored by macOS 26 (orca#12971; Qt "Curious Case"; Chromium/LLDB/Firefox;
+`disclaim` crate; `selfauth`). Earlier probes tested the wrong name
+(`setdisown`, removed). DESIGN learning #1 stands: Ghostty does **not**
+disclaim, so aural disclaims **itself**.
+
+Implementation (`src/macos.rs`): before any side effects, commands that install
+the keyboard hook (`run`, live `bench`) or report on it (`doctor`) re-exec a
+copy of self (same argv/env, plus `AURAL_DISCLAIMED=1` guard; no file actions,
+so stdio is inherited) with the disclaim posix_spawn attribute. We use the
+proven **child-spawn** pattern — Terminal.app/iTerm2/selfauth/disclaim all spawn
+without `POSIX_SPAWN_SETEXEC`, because the disclaim flag is applied in the
+spawn child and `SETEXEC` bypasses it. The parent forwards
+SIGINT/SIGTERM/SIGHUP and exits with the child's status, preserving foreground
+Ctrl+C and exit-code behavior. `daemon::spawn_detached` strips the guard env so
+the daemon always re-evaluates disclaim for itself. `--stdin` and `--synthetic`
+skip disclaim (no hook, no TCC needed).
+
+Net effect: **every launch mode prompts/grants under aural/Aural** — plain
+`aural run` (disclaims), `open Aural.app --args …` (LaunchServices), and
+`aural install` (launchd). The README permission table and the §9
+bundle-attribution claim are superseded accordingly.
+
+`aural doctor` gained `secure input: not active` / names-the-holder reporting,
+and doctor also disclaims itself — so its Input Monitoring line now reflects
+aural's own grant in every launch mode (the learning #7 caveat predates
+doctor's self-disclaim and no longer applies).
+
+**Live bench (real typing, post-grant, M1, CoreAudio, 128-frame buffer):**
+**n=142, p50 1.42 ms / p95 2.49 ms / p99 2.56 ms / max 2.67 ms**. The TCC
+prompt named **aural**; typing produced sound; the tap path is verified
+end-to-end and lands under even the synthetic pre-blocker figures.
 

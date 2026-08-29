@@ -31,7 +31,8 @@ Windows 10+ and **macOS (Apple Silicon)** are supported from one codebase — se
 [`DESIGN.md`](DESIGN.md) for the full research, analysis, and decision register.
 Linux is next, then feature work (sequencing in DESIGN.md §8).
 Live `bench` on Windows 10: **p50 5.5 ms / p95 9.4 ms** press→sound, under the 15 ms target.
-On macOS 26 (M1, CoreAudio, 128-frame buffer): synthetic bench **p50 1.4 ms / p95 2.6 ms**.
+On macOS 26 (M1, CoreAudio, 128-frame buffer): live bench **p50 1.42 ms / p95 2.49 ms**
+(n=142).
 
 ### Research
 
@@ -104,27 +105,32 @@ Quality gates (enforced by CI): `cargo fmt --check`, `cargo clippy --all-targets
 
 macOS gates keyboard capture behind System Settings → Privacy & Security → Input
 Monitoring. The prompt names the **responsible process** — the app macOS holds
-accountable — and the grant covers everything it runs:
+accountable — and the grant covers everything it runs. `aural` re-execs itself
+as its own responsible process on launch (self-disclaim), so the prompt and
+grant key to aural itself in every launch mode:
 
 | How you run `aural` | Prompt names | Grant covers |
 |---|---|---|
-| `aural run` from a terminal | your terminal | every program that terminal runs |
-| `Aural.app/Contents/MacOS/aural run` | **Aural** | only aural |
+| `aural run` from a terminal | **aural** | only aural |
+| `open Aural.app --args run` (LaunchServices) | **Aural** | only aural |
 | `aural install` (LaunchAgent, at login) | **aural** | only the daemon binary |
 
-For per-app permission without installing anything, wrap the same binary as an app
-bundle and run its inner executable — still from your terminal, still no install:
+After granting or toggling the entry, **quit & reopen** aural — the grant only
+takes effect on a fresh launch. `aural doctor` disclaims too, so its Input
+Monitoring line reports aural's own grant (e.g. `granted` once aural is in the
+list); `aural doctor` also reports Secure Event Input state and names any app
+holding it.
+
+The self-disclaim uses the same mechanism Terminal.app/iTerm2 use; for a stable
+per-build identity, sign the app bundle with a self-signed certificate
+(Keychain Access → Certificate Assistant → Create a Certificate → Code Signing)
+and package with `AURAL_SIGN_IDENTITY="YourCert" ./scripts/package-app.sh`:
 
 ```sh
 cargo build --release
 ./scripts/package-app.sh        # ad-hoc signs Aural.app (free, no Apple account)
-target/release/Aural.app/Contents/MacOS/aural run
+open target/release/Aural.app --args run
 ```
-
-Ad-hoc identity changes on every rebuild, so macOS re-prompts. For a stable local
-identity, create a self-signed code-signing certificate (Keychain Access → Certificate
-Assistant → Create a Certificate → Code Signing) and package with
-`AURAL_SIGN_IDENTITY="YourCert" ./scripts/package-app.sh`.
 
 ## Usage
 
@@ -139,7 +145,7 @@ aural volume 60            set volume (0-100)
 aural install              start automatically at login (Windows Run key / macOS LaunchAgent)
 aural uninstall
 aural bench                measure press→sound latency (p50/p95/p99)
-aural doctor               diagnostics: device, buffer, hook, assets
+aural doctor               diagnostics: device, buffer, hook, secure input, assets
 aural about                version + sound attribution
 ```
 

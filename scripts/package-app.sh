@@ -1,12 +1,12 @@
 #!/bin/sh
 # package-app.sh — wrap the release binary as Aural.app so macOS attributes
-# TCC permissions (Input Monitoring) to "Aural" instead of the terminal that
-# launched it (TCC grants go to the *responsible process*: for a naked binary
-# run from a terminal that is the terminal; for a binary inside an .app bundle
-# it is the bundle — regardless of who launched it). No install, login item,
-# or launchctl involved: run the bundled binary from any terminal:
+# TCC permissions (Input Monitoring) to "Aural" (TCC grants go to the
+# *responsible process*). aural also self-disclaims — re-execs itself as its
+# own responsible process on `run`/`bench`/`doctor` — so the bundle's main
+# job is giving the LaunchServices path (`open Aural.app --args …`) a proper
+# app identity. No install, login item, or launchctl involved:
 #
-#   Aural.app/Contents/MacOS/aural run
+#   open Aural.app --args run
 #
 # Identity: ad-hoc signed by default (free, automatic on arm64); each rebuild
 # then re-prompts TCC. For a stable local identity, create a self-signed

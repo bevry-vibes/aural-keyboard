@@ -7,5 +7,7 @@ pub mod engine;
 pub mod hook;
 #[cfg(target_os = "macos")]
 pub mod keycodes;
+#[cfg(target_os = "macos")]
+pub mod macos;
 pub mod mapping;
 pub mod mixer;

@@ -55,7 +55,15 @@ enum Command {
 }
 
 fn main() -> Result<()> {
-    match Cli::parse().command {
+    let cli = Cli::parse();
+    // Re-exec disclaimed (macOS) before anything else so TCC attributes the
+    // Input Monitoring grant to aural itself, not the launching terminal —
+    // only for commands that install the keyboard hook.
+    #[cfg(target_os = "macos")]
+    if disclaim_needed(&cli.command) {
+        aural::macos::disclaim()?;
+    }
+    match cli.command {
         Command::Run { daemon, stdin } => {
             aural::engine::install_ctrlc();
             aural::engine::run(daemon, stdin, None)
@@ -110,6 +118,18 @@ fn main() -> Result<()> {
     }
 }
 
+/// Whether the command installs the keyboard hook (needs Input Monitoring) or
+/// reports on it, so it is worth re-exec'ing disclaimed. `--stdin`,
+/// `--synthetic`, and the control commands (`start`/`stop`/`status`/`mute`/
+/// `volume`/`about`/`install`/`uninstall`) never touch the hook and need no TCC.
+#[cfg(target_os = "macos")]
+fn disclaim_needed(cmd: &Command) -> bool {
+    matches!(
+        cmd,
+        Command::Run { stdin: false, .. } | Command::Bench { synthetic: None } | Command::Doctor
+    )
+}
+
 fn doctor() -> Result<()> {
     use cpal::traits::DeviceTrait;
     println!("aural {}", env!("CARGO_PKG_VERSION"));
@@ -155,5 +175,7 @@ fn doctor() -> Result<()> {
             );
         }
     }
+    #[cfg(target_os = "macos")]
+    println!("{}", aural::macos::secure_input_check());
     Ok(())
 }

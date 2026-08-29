@@ -57,6 +57,9 @@ fn spawn_detached() -> Result<u32> {
     let child = unsafe {
         Command::new(exe)
             .args(["run", "--daemon"])
+            // The daemon must re-evaluate self-disclaim for itself (it is
+            // responsible for the event tap); never inherit a stale guard.
+            .env_remove("AURAL_DISCLAIMED")
             .stdin(Stdio::from(dev_null))
             .stdout(Stdio::from(out))
             .stderr(Stdio::from(err))

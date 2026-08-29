@@ -61,6 +61,7 @@ extern "C" {
         user_info: *mut c_void,
     ) -> CFMachPortRef;
     fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
+    fn CGEventTapIsEnabled(tap: CFMachPortRef) -> bool;
     fn CGEventGetIntegerValueField(event: CGEventRef, field: u32) -> i64;
     fn CGEventGetFlags(event: CGEventRef) -> u64;
 }
@@ -77,7 +78,7 @@ extern "C" {
 #[link(name = "CoreFoundation", kind = "framework")]
 extern "C" {
     #[allow(non_upper_case_globals)]
-    static kCFRunLoopDefaultMode: CFStringRef;
+    static kCFRunLoopCommonModes: CFStringRef;
     fn CFMachPortCreateRunLoopSource(
         allocator: CFAllocatorRef,
         port: CFMachPortRef,
@@ -96,9 +97,6 @@ extern "C" {
 /// The tap mach port, so the callback can re-enable it after an OS timeout
 /// disable (single-instance process, so a plain static is fine).
 static TAP_PORT: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
-
-/// TEMP-DIAG: raw callback counter for deaf-tap debugging (unconditional).
-static CB_COUNT: AtomicU64 = AtomicU64::new(0);
 
 /// The mute hotkey as `(MOD_* << 32) | vk` (same encoding as
 /// `config::parse_hotkey`); 0 = disabled. Detected in-tap (no Carbon hotkey API).
@@ -125,15 +123,6 @@ extern "C" fn tap_callback(
     event: CGEventRef,
     _user_info: *mut c_void,
 ) -> CGEventRef {
-    // TEMP-DIAG: unconditional visibility while debugging deaf taps.
-    let diag_n = CB_COUNT.fetch_add(1, Ordering::Relaxed);
-    if diag_n < 50 {
-        let k = unsafe { CGEventGetIntegerValueField(event, CG_KEYBOARD_EVENT_KEYCODE) };
-        eprintln!(
-            "aural(diag): tap callback #{diag_n} type={event_type} keycode={k} vk={:#04x}",
-            keycodes::vk_for_keycode(k as u16)
-        );
-    }
     if log_keys_enabled() {
         eprintln!("aural: tap event type {event_type}");
     }
@@ -270,9 +259,9 @@ pub fn spawn(
             unsafe { CGRequestListenEventAccess() };
             eprintln!(
                 "aural: Input Monitoring permission is missing — waiting up to 5 minutes.\n  \
-                 → Grant \"Aural\" (bundled app) or your terminal (plain `aural run`) in\n    \
-                 System Settings → Privacy & Security → Input Monitoring; a system prompt\n    \
-                 may also appear. aural continues automatically once granted."
+                 → Grant \"aural\" in System Settings → Privacy & Security → Input\n    \
+                 Monitoring; a system prompt may also appear (it names aural). aural\n    \
+                 continues automatically once granted."
             );
             let mut granted = false;
             for _ in 0..600 {
@@ -311,12 +300,9 @@ pub fn spawn(
                 ready_tx
                     .send(Err(anyhow::anyhow!(
                         "could not create the keyboard event tap (CGEventTapCreate failed)\n\
-                         → Input Monitoring permission is missing. A macOS prompt names the\n\
-                         app that launched aural (usually your terminal): enable it in\n\
-                         System Settings → Privacy & Security → Input Monitoring, then run\n\
-                         aural again. The grant covers anything the terminal runs, so\n\
-                         `aural run` needs no install. (To have `aural` itself named\n\
-                         instead, run it via launchd — `aural install` — or an app bundle.)"
+                         → Input Monitoring permission is missing for aural. Enable it in\n\
+                         System Settings → Privacy & Security → Input Monitoring (the prompt\n\
+                         names aural), then run `aural run` again."
                     )))
                     .ok();
                 return;
@@ -332,22 +318,10 @@ pub fn spawn(
                 return;
             }
             let run_loop = CFRunLoopGetCurrent();
-            CFRunLoopAddSource(run_loop, source, kCFRunLoopDefaultMode);
+            CFRunLoopAddSource(run_loop, source, kCFRunLoopCommonModes);
             CGEventTapEnable(port, true);
-            // TEMP-DIAG: secure event input (Terminal's Secure Keyboard Entry,
-            // password managers, …) makes every event tap deaf system-wide.
-            {
-                type SeiFn = unsafe extern "C" fn() -> bool;
-                let path = b"/System/Library/Frameworks/Carbon.framework/Frameworks/HIToolbox.framework/HIToolbox\0";
-                let h = libc::dlopen(path.as_ptr() as *const _, libc::RTLD_LAZY);
-                if !h.is_null() {
-                    let sym = libc::dlsym(h, c"IsSecureEventInputEnabled".as_ptr());
-                    if !sym.is_null() {
-                        let f: SeiFn = std::mem::transmute(sym);
-                        eprintln!("aural(diag): IsSecureEventInputEnabled = {}", f());
-                    }
-                }
-                eprintln!("aural(diag): tap enabled, run loop starting");
+            if !CGEventTapIsEnabled(port) {
+                eprintln!("aural: warning — event tap not enabled after CGEventTapEnable");
             }
             let run_loop = CFRetain(run_loop) as usize; // hand a Send-able copy to the handle
             ready_tx.send(Ok(run_loop)).ok();
