@@ -70,7 +70,7 @@ pub fn synthetic(count: usize) -> Result<()> {
 /// Live: full engine + hook; type freely, Ctrl+C prints the report.
 pub fn live() -> Result<()> {
     let (bench_tx, bench_rx) = crossbeam_channel::unbounded();
-    engine::run(false, Some(bench_tx))?;
+    engine::run(false, false, Some(bench_tx))?;
     let samples: Vec<u64> = bench_rx.try_iter().collect();
     println!("{}", report(&samples));
     Ok(())

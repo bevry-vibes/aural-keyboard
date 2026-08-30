@@ -27,9 +27,14 @@ immediately discarded — nothing is ever stored or sent anywhere.
 
 ### Status
 
-Windows 10 first (active development). macOS and Linux follow from the same codebase —
-see [`DESIGN.md`](DESIGN.md) for the full research, analysis, and decision register.
+Windows 10+ and **macOS (Apple Silicon)** are supported from one codebase — see
+[`DESIGN.md`](DESIGN.md) for the full research, analysis, and decision register.
+macOS support has landed (2026-08-30); **Linux is still pending** (sequencing in
+DESIGN.md §8). After Linux, a menubar/status-bar/tray icon is planned with
+enable/disable sound, quit, start-at-login, and open-`aural doctor` menu items.
 Live `bench` on Windows 10: **p50 5.5 ms / p95 9.4 ms** press→sound, under the 15 ms target.
+On macOS 26 (M1, CoreAudio, 128-frame buffer): live bench **p50 1.42 ms / p95 2.49 ms**
+(n=142).
 
 ### Research
 
@@ -56,23 +61,26 @@ cargo install aural
 **Straight from the repo (no clone needed):**
 
 ```powershell
-cargo install --git https://github.com/bevry-labs/aural-system-keyboard
+cargo install --git https://github.com/bevry-vibes/aural-keyboard
 ```
 
 **From a local clone:**
 
 ```powershell
-git clone https://github.com/bevry-labs/aural-system-keyboard
+git clone https://github.com/bevry-vibes/aural-keyboard
 cd aural-system-keyboard
 cargo install --path .
 ```
 
-**Prebuilt binary:** download `aural-windows-x64.zip` (with sha256 sidecar) from
-[Releases](https://github.com/bevry-labs/aural-system-keyboard/releases); CI also uploads
-`aural.exe` as the `aural-windows-x64` artifact on every green build (see the Actions tab).
+**Prebuilt binary:** download `aural-windows-x64.zip` or `aural-macos-arm64.zip` /
+`aural-macos-arm64-Aural.app.zip` (each with a sha256 sidecar) from
+[Releases](https://github.com/bevry-vibes/aural-keyboard/releases); CI also uploads
+binaries as artifacts on every green build (see the Actions tab).
+macOS downloads carry the quarantine attribute — after unzipping, run
+`xattr -d com.apple.quarantine ./aural` (or on `Aural.app`) once.
 
 Note: the `aural install` *subcommand* is a different thing — it registers an
-already-installed `aural` to start at login via the Windows Run key. See
+already-installed `aural` to start at login (Windows Run key / macOS LaunchAgent). See
 [Usage](#usage).
 
 ### Building from source
@@ -82,31 +90,64 @@ Requires a [Rust toolchain](https://rustup.rs) (stable). Sound samples are commi
 plain build is all you need:
 
 ```powershell
-git clone https://github.com/bevry-labs/aural-system-keyboard
+git clone https://github.com/bevry-vibes/aural-keyboard
 cd aural-system-keyboard
 cargo build --release
 target\release\aural.exe run
 ```
 
 On Windows both the MSVC and GNU host toolchains work; with the GNU toolchain, binutils
-(`dlltool`) must be on PATH for linking. macOS and Linux builds are not wired up yet
-(see [`DESIGN.md`](DESIGN.md)).
+(`dlltool`) must be on PATH for linking. On macOS (Apple Silicon), any recent stable
+toolchain works; see the next section for the one permission the OS requires. Linux
+builds are not wired up yet (see [`DESIGN.md`](DESIGN.md)).
 
 Quality gates (enforced by CI): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`.
+
+### macOS: Input Monitoring permission
+
+macOS gates keyboard capture behind System Settings → Privacy & Security → Input
+Monitoring. The prompt names the **responsible process** — the app macOS holds
+accountable — and the grant covers everything it runs. `aural` re-execs itself
+as its own responsible process on launch (self-disclaim), so the prompt and
+grant key to aural itself in every launch mode:
+
+| How you run `aural` | Prompt names | Grant covers |
+|---|---|---|
+| `aural run` from a terminal | **aural** | only aural |
+| `open Aural.app --args run` (LaunchServices) | **Aural** | only aural |
+| `aural install` (LaunchAgent, at login) | **aural** | only the daemon binary |
+
+After granting or toggling the entry, **quit & reopen** aural — the grant only
+takes effect on a fresh launch. `aural doctor` disclaims too, so its Input
+Monitoring line reports aural's own grant (e.g. `granted` once aural is in the
+list); `aural doctor` also reports Secure Event Input state and names any app
+holding it.
+
+The self-disclaim uses the same mechanism Terminal.app/iTerm2 use; for a stable
+per-build identity, sign the app bundle with a self-signed certificate
+(Keychain Access → Certificate Assistant → Create a Certificate → Code Signing)
+and package with `AURAL_SIGN_IDENTITY="YourCert" ./scripts/package-app.sh`:
+
+```sh
+cargo build --release
+./scripts/package-app.sh        # ad-hoc signs Aural.app (free, no Apple account)
+open target/release/Aural.app --args run
+```
 
 ## Usage
 
 ```text
 aural run                  run the engine in the foreground (Ctrl+C to quit)
+aural run --stdin          read keys from stdin, not the OS hook (testing; no permissions)
 aural start                start as a background daemon
 aural stop                 stop the daemon
 aural status               is it running?
 aural mute | unmute | toggle
 aural volume 60            set volume (0-100)
-aural install              start automatically at login (Windows Run key)
+aural install              start automatically at login (Windows Run key / macOS LaunchAgent)
 aural uninstall
 aural bench                measure press→sound latency (p50/p95/p99)
-aural doctor               diagnostics: device, buffer, hook, assets
+aural doctor               diagnostics: device, buffer, hook, secure input, assets
 aural about                version + sound attribution
 ```
 

@@ -1,10 +1,10 @@
 [package]
 name = "aural"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "System-wide melodic keyboard sounds: piano for letters, drums for everything else (a port of aural-coding to the OS)"
-repository = "https://github.com/bevry-labs/aural-system-keyboard"
-homepage = "https://github.com/bevry-labs/aural-system-keyboard"
+repository = "https://github.com/bevry-vibes/aural-keyboard"
+homepage = "https://github.com/bevry-vibes/aural-keyboard"
 license = "RPL-1.5"
 keywords = ["keyboard", "audio", "sound", "midi", "typing"]
 categories = ["command-line-utilities", "multimedia::audio"]
@@ -19,6 +19,9 @@ dirs = "6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 symphonia = { version = "0.6", default-features = false, features = ["ogg", "vorbis"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

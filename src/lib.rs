@@ -2,11 +2,12 @@ pub mod assets;
 pub mod audio;
 pub mod bench;
 pub mod config;
+pub mod daemon;
 pub mod engine;
+pub mod hook;
+#[cfg(target_os = "macos")]
+pub mod keycodes;
+#[cfg(target_os = "macos")]
+pub mod macos;
 pub mod mapping;
 pub mod mixer;
-
-#[cfg(windows)]
-pub mod daemon;
-#[cfg(windows)]
-pub mod hook;

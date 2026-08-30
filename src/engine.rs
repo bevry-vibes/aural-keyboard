@@ -75,7 +75,7 @@ impl Engine {
 // device/supported are only read again on watchdog rebuilds, which the
 // flow-insensitive lint can't see.
 #[allow(unused_assignments)]
-pub fn run(daemon: bool, bench_tx: Option<Sender<u64>>) -> Result<()> {
+pub fn run(daemon: bool, stdin_keys: bool, bench_tx: Option<Sender<u64>>) -> Result<()> {
     if daemon {
         crate::daemon::redirect_stdio_to_log();
     }
@@ -91,15 +91,23 @@ pub fn run(daemon: bool, bench_tx: Option<Sender<u64>>) -> Result<()> {
         Some(s)
     };
     let config = config::load();
-    let hook_id = crate::hook::spawn(
-        engine.trigger_tx.clone(),
-        engine.flags.clone(),
-        config::parse_hotkey(&config.hotkey),
-    );
-    eprintln!(
-        "aural: keyboard hook installed (thread {hook_id}), hotkey {}",
-        config.hotkey
-    );
+    let mut hook = None;
+    if stdin_keys {
+        eprintln!("aural: reading keys from stdin (each char = a key, Enter = Return)");
+        crate::hook::spawn_stdin_reader(engine.trigger_tx.clone(), engine.flags.clone());
+    } else {
+        let h = crate::hook::spawn(
+            engine.trigger_tx.clone(),
+            engine.flags.clone(),
+            config::parse_hotkey(&config.hotkey),
+        )
+        .context("keyboard hook")?;
+        eprintln!(
+            "aural: keyboard hook installed ({h}), hotkey {}",
+            config.hotkey
+        );
+        hook = Some(h);
+    }
     if daemon {
         std::fs::write(config::pid_path(), std::process::id().to_string()).ok();
     }
@@ -160,7 +168,9 @@ pub fn run(daemon: bool, bench_tx: Option<Sender<u64>>) -> Result<()> {
         }
     }
 
-    crate::hook::stop(hook_id);
+    if let Some(hook) = hook {
+        crate::hook::stop(hook);
+    }
     drop(stream);
     if daemon {
         let _ = std::fs::remove_file(config::pid_path());
