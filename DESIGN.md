@@ -1,6 +1,6 @@
 # DESIGN — aural-system-keyboard (`aural`)
 
-**Status:** Foundational design, agreed pre-implementation · **Date:** 2026-08-04 · **Repo:** <https://github.com/bevry-labs/aural-system-keyboard> · **Platform order:** Windows 10 → macOS → Linux
+**Status:** Foundational design, agreed pre-implementation · **Date:** 2026-08-04 · **Repo:** <https://github.com/bevry-vibes/aural-keyboard> · **Platform order:** Windows 10 → macOS → Linux
 
 > This document preserves the original intent, research, and reasoning so the
 > foundational decisions can be re-hashed if reality disagrees. §7 lists the

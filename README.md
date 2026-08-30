@@ -61,20 +61,20 @@ cargo install aural
 **Straight from the repo (no clone needed):**
 
 ```powershell
-cargo install --git https://github.com/bevry-labs/aural-system-keyboard
+cargo install --git https://github.com/bevry-vibes/aural-keyboard
 ```
 
 **From a local clone:**
 
 ```powershell
-git clone https://github.com/bevry-labs/aural-system-keyboard
+git clone https://github.com/bevry-vibes/aural-keyboard
 cd aural-system-keyboard
 cargo install --path .
 ```
 
 **Prebuilt binary:** download `aural-windows-x64.zip` or `aural-macos-arm64.zip` /
 `aural-macos-arm64-Aural.app.zip` (each with a sha256 sidecar) from
-[Releases](https://github.com/bevry-labs/aural-system-keyboard/releases); CI also uploads
+[Releases](https://github.com/bevry-vibes/aural-keyboard/releases); CI also uploads
 binaries as artifacts on every green build (see the Actions tab).
 macOS downloads carry the quarantine attribute — after unzipping, run
 `xattr -d com.apple.quarantine ./aural` (or on `Aural.app`) once.
@@ -90,7 +90,7 @@ Requires a [Rust toolchain](https://rustup.rs) (stable). Sound samples are commi
 plain build is all you need:
 
 ```powershell
-git clone https://github.com/bevry-labs/aural-system-keyboard
+git clone https://github.com/bevry-vibes/aural-keyboard
 cd aural-system-keyboard
 cargo build --release
 target\release\aural.exe run
