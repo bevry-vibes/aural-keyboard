@@ -147,10 +147,12 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
 
 ## 8. Open items pending user feedback
 
-> **Sequencing (ruled 2026-08-04):** platform parity outranks feature work — the
-> macOS port, then the Linux port, ship before any of the feature items below
-> (mute-hotkey changes, musical variants, extras) are entertained. The ports
-> themselves change no behavior: existing defaults are carried over as-is.
+> **Sequencing (ruled 2026-08-04; macOS landed 2026-08-30):** platform parity
+> outranks feature work — the macOS port then the Linux port ship before any of
+> the feature items below (mute-hotkey changes, musical variants, extras) are
+> entertained. The ports themselves change no behavior: existing defaults are
+> carried over as-is. macOS shipped 2026-08-30 (bring-up, §10); **Linux is the
+> remaining port before feature work.**
 
 1. ~~**Commit co-author identity**~~ — resolved: `Co-authored-by: Cline - Kimi K3
    <cline-kimik3@local>` (per bevry `commits.md` known identities); used since the root
@@ -162,6 +164,10 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
 4. Optional musical variants (off by default): "corrected" C-major scale option; stereo pan
    by key column; velocity humanization (±small %). **Frozen by the sequencing note above.**
    Same for layout-aware letters (macOS `UCKeyTranslate`, Windows `ToUnicodeEx`).
+5. Menubar/status-bar/tray icon app (queued 2026-08-30; post-Linux). D8 keeps the
+   engine shell-agnostic, so this is a UI shell only. Menu items: **enable/disable
+   sound** (mute toggle), **quit**, **start at login** toggle (launchd / Run key /
+   systemd), and **open `aural doctor`**.
 
 ## 9. macOS implementation notes (2026-08-04; macOS 26.6, M1 arm64)
 

@@ -29,7 +29,9 @@ immediately discarded — nothing is ever stored or sent anywhere.
 
 Windows 10+ and **macOS (Apple Silicon)** are supported from one codebase — see
 [`DESIGN.md`](DESIGN.md) for the full research, analysis, and decision register.
-Linux is next, then feature work (sequencing in DESIGN.md §8).
+macOS support has landed (2026-08-30); **Linux is still pending** (sequencing in
+DESIGN.md §8). After Linux, a menubar/status-bar/tray icon is planned with
+enable/disable sound, quit, start-at-login, and open-`aural doctor` menu items.
 Live `bench` on Windows 10: **p50 5.5 ms / p95 9.4 ms** press→sound, under the 15 ms target.
 On macOS 26 (M1, CoreAudio, 128-frame buffer): live bench **p50 1.42 ms / p95 2.49 ms**
 (n=142).
