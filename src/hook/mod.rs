@@ -81,7 +81,7 @@ pub(crate) fn handle_key(vk: u8, is_up: bool) {
         return; // held-key autorepeat: original ignores these
     }
     if let Some(note) = mapping::map_key(vk, shift_down) {
-        if LOG_KEYS.load(Ordering::Relaxed) {
+        if log_keys_enabled() {
             eprintln!(
                 "aural: key {vk:#04x} (shift={shift_down}) → {:?} midi {} vel {}",
                 note.instrument, note.midi, note.velocity
