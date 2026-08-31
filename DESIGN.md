@@ -471,3 +471,58 @@ doctor's self-disclaim and no longer applies).
 prompt named **aural**; typing produced sound; the tap path is verified
 end-to-end and lands under even the synthetic pre-blocker figures.
 
+## 12. macOS menu-bar app learnings (2026-08-31; `aural menubar`)
+
+The menu-bar app shipped this session. The permission/audio debugging took far
+too long; these are the hard-won lessons so it never recurs.
+
+### TCC / Input Monitoring (the recurring "no sound" trap)
+1. **A TCC grant is keyed to the code signature (cdhash), not the name.** The
+   `com.bevry.aural` row can sit in the DB as granted (`auth_value=2`) while
+   the *current* binary still reports "NOT granted" — because every re-sign
+   changed the cdhash and the old grant no longer applies. **Do not trust the
+   DB row; trust `CGPreflightListenEventAccess()` / `aural doctor`.**
+2. **Ad-hoc signing re-signs on every build → re-grant every build.** This was
+   the single biggest time sink. Fix: a **stable self-signed identity**
+   (`AURAL_SIGN_IDENTITY="Aural Code Signing"`), which keeps the cdhash
+   constant so the grant persists. `scripts/package-app.sh` now auto-detects
+   the identity and defaults to it. (Learning #6 in §10 was the same root
+   cause; the menubar hit it again because the bundle was ad-hoc.)
+3. **The self-disclaim breaks the bundle's grant.** `aural menubar` re-exec'd
+   itself disclaimed, creating a *new* TCC identity (the raw binary path) that
+   wasn't granted — so the hook saw "NOT granted" even though `com.bevry.aural`
+   was granted. Fix: **skip disclaim when running inside the `.app` bundle**
+   (`in_app_bundle()` in `main.rs`), where LaunchServices already attributes
+   the grant to "Aural".
+4. **A stale grant + a changed signature = the "granted but still no sound"
+   paradox.** The DB says granted, the app says not. Reset with
+   `tccutil reset ListenEvent com.bevry.aural`, then re-grant once with the
+   current signature. The 3 s poll (was 500 ms) picks it up without a restart.
+5. **Diagnose the hook vs. audio separately.** `aural run --stdin` proves the
+   audio path (engine/mixer/output) with no hook and no TCC. If that works but
+   the hook doesn't, the problem is the hook/permission — not the sound system.
+   This split saved the session.
+
+### Menu-bar / tray-icon runtime
+6. **tray-icon's menu needs the AppKit run loop in event-tracking mode.**
+   `NSRunLoop runUntilDate:` (default mode) renders the icon but drops menu
+   clicks. Use `NSApplication.run()` (services all modes) + `MenuEvent::
+   set_event_handler`, not a manual poll.
+7. **muda menu items default to `enabled: false`.** Every `MenuItemBuilder`/
+   `CheckMenuItemBuilder` must call `.enabled(true)` or the whole menu renders
+   greyed-out and unclickable.
+8. **A colored status icon renders small vs. template icons.** Template icons
+   (black+alpha) auto-tint and auto-size to fill the status bar; a colored
+   image renders at a fixed 18 pt. To keep the colored icon, crop to content
+   and scale up to fill the canvas; generate at 44 px (2× of ~22 pt on retina)
+   and **trim before downscaling** (downscale is sharp; upscaling a cropped
+   glyph blurs it).
+9. **`Icon::from_rgba` needs true RGBA.** `png`'s `EXPAND` does not expand
+   GrayscaleAlpha→RGBA; force `png:color-type=6` when generating the icon or
+   the decode fails with a pixel-count mismatch.
+10. **`open -a Terminal <script>` avoids the Automation prompt.** AppleScript
+    (`osascript`) to control Terminal triggers a "control Terminal" permission
+    prompt; plain LaunchServices `open` does not. The script needs the exec bit
+    (`0o755`) or `open` refuses to run it.
+
+
