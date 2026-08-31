@@ -15,6 +15,10 @@
 #
 #   AURAL_SIGN_IDENTITY="MyCertName" ./scripts/package-app.sh
 #
+# A stable identity keeps the code signature (cdhash) constant across builds,
+# so the TCC Input Monitoring grant persists instead of being invalidated on
+# every re-sign. If a self-signed "Aural Code Signing" identity exists in the
+# login keychain, it is used by default.
 # Env overrides: AURAL_APP (output path), AURAL_SIGN_IDENTITY (signing identity).
 set -eu
 
@@ -23,6 +27,16 @@ TARGET_DIR=${CARGO_TARGET_DIR:-"$ROOT/target"}
 BIN=${1:-"$TARGET_DIR/release/aural"}
 APP=${AURAL_APP:-"$TARGET_DIR/release/Aural.app"}
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -1)
+
+# Prefer a stable self-signed identity so the TCC grant survives rebuilds;
+# fall back to ad-hoc ("-") only if none exists.
+if [ -z "${AURAL_SIGN_IDENTITY:-}" ]; then
+    if security find-identity -v -p codesigning 2>/dev/null | grep -q "Aural Code Signing"; then
+        AURAL_SIGN_IDENTITY="Aural Code Signing"
+    else
+        AURAL_SIGN_IDENTITY="-"
+    fi
+fi
 
 [ -x "$BIN" ] || {
     echo "error: binary not found: $BIN (run: cargo build --release)" >&2

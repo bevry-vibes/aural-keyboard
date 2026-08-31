@@ -164,10 +164,12 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
 4. Optional musical variants (off by default): "corrected" C-major scale option; stereo pan
    by key column; velocity humanization (±small %). **Frozen by the sequencing note above.**
    Same for layout-aware letters (macOS `UCKeyTranslate`, Windows `ToUnicodeEx`).
-5. Menubar/status-bar/tray icon app (queued 2026-08-30; post-Linux). D8 keeps the
-   engine shell-agnostic, so this is a UI shell only. Menu items: **enable/disable
-   sound** (mute toggle), **quit**, **start at login** toggle (launchd / Run key /
-   systemd), and **open `aural doctor`**.
+5. Menubar/status-bar/tray icon app. D8 keeps the engine shell-agnostic, so this is a
+   UI shell only. **macOS `aural menubar` shipped 2026-08-31** (this branch) — a
+   `tray-icon`-wrapped `NSStatusItem` hosting the engine with native checkboxes:
+   **Mute**, **Enable at Login**, **Open Doctor**, and **Quit**; run the engine on a
+   worker thread and pump the AppKit main loop for the menu (no winit/tao). Linux
+   tray still pending (needs gtk/libappindicator); Windows tray optional.
 
 ## 9. macOS implementation notes (2026-08-04; macOS 26.6, M1 arm64)
 

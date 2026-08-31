@@ -188,6 +188,13 @@ pub fn uninstall() -> Result<()> {
     Ok(())
 }
 
+/// Whether a launch-at-login LaunchAgent is registered (macOS). Used by the
+/// menubar's "Enable at Login" check state and `aural doctor`.
+#[cfg(target_os = "macos")]
+pub fn login_enabled() -> bool {
+    plist_path().map(|p| p.exists()).unwrap_or_default()
+}
+
 /// Minimal XML text escaping for the plist (paths with spaces need none; `&`
 /// and `<` in a path would break parsing otherwise).
 #[cfg(target_os = "macos")]
