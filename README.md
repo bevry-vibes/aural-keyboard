@@ -1,4 +1,4 @@
-# aural-system-keyboard (`aural`)
+# aural-keyboard (`aural`)
 
 System-wide **melodic** keyboard sounds for Windows, macOS, and Linux — a faithful port of
 [aural-coding](https://github.com/probablycorey/aural-coding) out of the editor and
@@ -66,7 +66,7 @@ cargo install --git https://github.com/bevry-vibes/aural-keyboard
 
 ```powershell
 git clone https://github.com/bevry-vibes/aural-keyboard
-cd aural-system-keyboard
+cd aural-keyboard
 cargo install --path .
 ```
 
@@ -89,7 +89,7 @@ plain build is all you need:
 
 ```powershell
 git clone https://github.com/bevry-vibes/aural-keyboard
-cd aural-system-keyboard
+cd aural-keyboard
 cargo build --release
 target\release\aural.exe run
 ```
@@ -148,6 +148,8 @@ For the Input Monitoring grant to survive rebuilds, sign the bundle with a stabl
 self-signed identity (see `scripts/package-app.sh`); `package-app.sh` uses the
 "Aural Code Signing" identity automatically if it exists in the login keychain,
 falling back to ad-hoc otherwise.
+
+The menubar icon (`assets/aural-menubar.png`) was created by Microsoft Copilot.
 
 ## Usage
 

@@ -1,4 +1,4 @@
-# DESIGN — aural-system-keyboard (`aural`)
+# DESIGN — aural-keyboard (`aural`)
 
 **Status:** Foundational design, agreed pre-implementation · **Date:** 2026-08-04 · **Repo:** <https://github.com/bevry-vibes/aural-keyboard> · **Platform order:** Windows 10 → macOS → Linux
 
