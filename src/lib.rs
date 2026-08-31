@@ -10,4 +10,6 @@ pub mod keycodes;
 #[cfg(target_os = "macos")]
 pub mod macos;
 pub mod mapping;
+#[cfg(target_os = "macos")]
+pub mod menubar;
 pub mod mixer;

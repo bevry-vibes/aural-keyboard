@@ -264,8 +264,10 @@ pub fn spawn(
                  continues automatically once granted."
             );
             let mut granted = false;
-            for _ in 0..600 {
-                std::thread::sleep(std::time::Duration::from_millis(500));
+            // Poll every 3 s so a grant is picked up promptly (the request only
+            // presents the system prompt while the requester is alive).
+            for _ in 0..100 {
+                std::thread::sleep(std::time::Duration::from_secs(3));
                 if listen_access_granted() {
                     granted = true;
                     break;

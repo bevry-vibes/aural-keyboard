@@ -29,12 +29,10 @@ immediately discarded — nothing is ever stored or sent anywhere.
 
 Windows 10+ and **macOS (Apple Silicon)** are supported from one codebase — see
 [`DESIGN.md`](DESIGN.md) for the full research, analysis, and decision register.
-macOS support has landed (2026-08-30); **Linux is still pending** (sequencing in
-DESIGN.md §8). After Linux, a menubar/status-bar/tray icon is planned with
-enable/disable sound, quit, start-at-login, and open-`aural doctor` menu items.
-Live `bench` on Windows 10: **p50 5.5 ms / p95 9.4 ms** press→sound, under the 15 ms target.
-On macOS 26 (M1, CoreAudio, 128-frame buffer): live bench **p50 1.42 ms / p95 2.49 ms**
-(n=142).
+macOS support has landed (2026-08-30) including a **menu-bar app**; **Linux is still
+pending** (sequencing in DESIGN.md §8). Live `bench` on Windows 10: **p50 5.5 ms /
+p95 9.4 ms** press→sound, under the 15 ms target. On macOS 26 (M1, CoreAudio,
+128-frame buffer): live bench **p50 1.42 ms / p95 2.49 ms** (n=142).
 
 ### Research
 
@@ -134,6 +132,23 @@ cargo build --release
 open target/release/Aural.app --args run
 ```
 
+### macOS menu-bar app
+
+`aural menubar` hosts the engine (daemon) in-process and adds a status-bar item
+with native checkboxes for **Mute** and **Enable at Login**, plus **Open Doctor**
+and **Quit** (`LSUIElement`, so no Dock icon). Requires the same Input Monitoring
+permission as `aural run`; grant it via System Settings → Privacy & Security →
+Input Monitoring after first launch.
+
+**Open Doctor** opens a new Terminal window running `aural doctor` (kept open so
+you can read the diagnostics). The menubar only runs from within the packaged
+`Aural.app` bundle — `aural menubar` from a bare binary refuses.
+
+For the Input Monitoring grant to survive rebuilds, sign the bundle with a stable
+self-signed identity (see `scripts/package-app.sh`); `package-app.sh` uses the
+"Aural Code Signing" identity automatically if it exists in the login keychain,
+falling back to ad-hoc otherwise.
+
 ## Usage
 
 ```text
@@ -148,6 +163,8 @@ aural install              start automatically at login (Windows Run key / macOS
 aural uninstall
 aural bench                measure press→sound latency (p50/p95/p99)
 aural doctor               diagnostics: device, buffer, hook, secure input, assets
+aural menubar              (macOS) run as a menu-bar agent: status item with Mute,
+                           Enable at Login, Open Doctor, and Quit
 aural about                version + sound attribution
 ```
 

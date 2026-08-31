@@ -50,6 +50,8 @@ enum Command {
     },
     /// Diagnostics: device, buffer, assets, daemon state
     Doctor,
+    /// (macOS) run as a menu-bar app with mute / login / doctor / quit
+    Menubar,
     /// Version and sound attribution
     About,
 }
@@ -79,6 +81,13 @@ fn main() -> Result<()> {
         }
         Command::Install => aural::daemon::install(),
         Command::Uninstall => aural::daemon::uninstall(),
+        #[cfg(target_os = "macos")]
+        Command::Menubar => aural::menubar::run(),
+        #[cfg(not(target_os = "macos"))]
+        Command::Menubar => {
+            eprintln!("aural menubar: not supported on this platform");
+            std::process::exit(1);
+        }
         Command::Mute => {
             aural::config::update(|c| c.muted = true)?;
             println!("aural: muted");
@@ -122,12 +131,33 @@ fn main() -> Result<()> {
 /// reports on it, so it is worth re-exec'ing disclaimed. `--stdin`,
 /// `--synthetic`, and the control commands (`start`/`stop`/`status`/`mute`/
 /// `volume`/`about`/`install`/`uninstall`) never touch the hook and need no TCC.
+///
+/// When launched from within the packaged `Aural.app` bundle, the responsible
+/// process is already "Aural" (a stable, grantable identity), so disclaiming
+/// would only create a *new* TCC identity (the raw binary path) that the user
+/// hasn't granted. Skip the re-exec in that case.
 #[cfg(target_os = "macos")]
 fn disclaim_needed(cmd: &Command) -> bool {
+    if in_app_bundle() {
+        return false;
+    }
     matches!(
         cmd,
-        Command::Run { stdin: false, .. } | Command::Bench { synthetic: None } | Command::Doctor
+        Command::Run { stdin: false, .. }
+            | Command::Bench { synthetic: None }
+            | Command::Doctor
+            | Command::Menubar
     )
+}
+
+/// True when the running binary lives inside a `.app` bundle (the packaged
+/// Aural.app), so TCC already attributes the grant to "Aural".
+#[cfg(target_os = "macos")]
+fn in_app_bundle() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.ends_with("MacOS")))
+        .unwrap_or(false)
 }
 
 fn doctor() -> Result<()> {

@@ -23,6 +23,16 @@ symphonia = { version = "0.6", default-features = false, features = ["ogg", "vor
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# The menubar subsystem is only compiled and exercised on macOS, keeping the
+# Windows/Linux builds free of GUI frameworks (DESIGN.md D8: "add tray/GUI
+# without touching the engine").
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = "0.3"
+objc2-foundation = "0.3"
+png = "0.18"
+tray-icon = "0.24"
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
     "Win32_Foundation",
