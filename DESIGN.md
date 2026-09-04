@@ -176,6 +176,11 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
 
 ## 11. Linux implementation notes (2026-09-02; Fedora 44, GNOME Shell 50.4, Wayland)
 
+> Prior-art cross-reference: §13 surveys the reference projects' Linux input
+> capture and tray approaches — it confirms the evdev choice (finding 1) and
+> that our dedicated-user hardening (below) is beyond the field's state of the
+> art (finding 2).
+
 - **Hook** — `src/hook/linux.rs`: listen-only evdev readers over
   `/dev/input/event*`, one per keyboard-class device (a device is a keyboard when
   it can produce both `KEY_A` and `KEY_SPACE` — excludes power buttons/headphone
@@ -595,3 +600,69 @@ too long; these are the hard-won lessons so it never recurs.
     (`0o755`) or `open` refuses to run it.
 
 
+
+## 13. Linux prior-art survey (2026-09-03; input capture & tray, on the dev/linux branch)
+
+> Requested checkpoint before resuming dedicated-user debugging: evaluate the
+> §3 reference projects' actual Linux approaches — security (input capture) and
+> tray — and compare against our port (§11). Sources: each project's README +
+> Linux docs + (where it mattered) hook source.
+
+### Survey
+
+| Project | Stack | Linux status | Input capture | Permission model | Wayland | Tray |
+|---|---|---|---|---|---|---|
+| KeyEcho (860★) | Rust + Tauri | ships (x64/ARM64) | **X11 XInput2 raw events**: `XOpenDisplay` + `XISelectEvents(XI_RawKeyPress/Release, XIAllMasterDevices)` + blocking `XNextEvent` loop; hand-rolled (rdev-inspired), no rdev dep; `XIKeyRepeat` filtered at source | **none** — X11 client (any client can record on X11) | ✗ (fails `MissingDisplay` on pure Wayland; XWayland raw events only see X11-app input) | Tauri tray → **tray-icon crate (ours)**; audio = symphonia + rodio + LRU-decoded WAV cache |
+| keyboardsounds (Python, →Pro) | Python daemon + desktop app | desktop beta | **session-switched: pynput/X11 on X11, libevdev on Wayland** | **`input` group via usermod required; explicitly "not supported when running as root"** | ✓ via libevdev | pystray → libappindicator (SNI); tkinter daemon window for OBS |
+| keyboardsounds-pro (Go backend, active successor) | Go + GUI | ships | evdev (implied by the group requirement) | **`input` group via usermod required** | ✓ (evdev) | GUI app (SNI ecosystem) |
+| keyboardsounds-prime | fork of keyboardsounds | same lineage | same | same | same | same |
+| Mechvibes (Electron, legacy) / mechvibes-x fork | Electron + iohook | Linux builds existed; **mechvibes-x is Windows-only** | **iohook/libuiohook → X11 XRecord** | none (X11 client) | ✗ | Electron Tray → libappindicator (SNI) |
+| mechvibes-dx (successor, in dev) | **Rust + webview rewrite** | in progress | n/a yet | n/a | n/a | n/a |
+| Thockify-CLI (Rust, rdev + rodio) | Rust CLI | **Windows-only today** (Linux "planned"; config path already documented) | rdev (Linux backend = X11) | none (X11) | ✗ | none (CLI daemon; start/stop/PID file mirrors ours) |
+| keyboard-sounds-cpp (C++/BASS) | C++ | **Windows-only** (Linux/macOS unchecked roadmap) | iohook (would be X11) | none | ✗ | traypp (Soundux) — same SNI family; BASS = proprietary, a licensing anti-pattern we avoided (D7) |
+| macOS-only set (thock, keesound, TypeTock, kutuk, MKSTE, TickeysRedux, key-clicker, keyBeats) | — | no Linux | — | — | — | — |
+
+### Findings (compare & contrast with §11)
+
+1. **The field has exactly two capture routes: X11 and evdev+`input` group.**
+   X11 (XInput2 raw / XRecord / libuiohook) needs zero permissions but is dead
+   on Wayland; evdev needs the group but works everywhere. The actively
+   developed Linux efforts (keyboardsounds → Pro, aural) converged on evdev;
+   the X11 contingent is Electron/iohook legacy or unshipped plans. Our evdev
+   choice (§11 L1) is the only route that works on modern Fedora GNOME (no X11
+   fallback) — prior art confirms it; KeyEcho's `MissingDisplay` failure mode
+   is the counterfactual.
+2. **Nobody goes beyond "join the `input` group".** No udev rules, no
+   capabilities, no logind TakeDevice, no portals, no dedicated user, and
+   keyboardsounds explicitly refuses root. Our dedicated-user mode
+   (keyboard-only udev ACL + hardened systemd service + `AURAL_CONFIG_DIR`
+   state sharing) is **beyond the state of the art in this niche** — a
+   differentiator worth documenting publicly and potentially upstreaming as a
+   reference pattern.
+3. **Tray: total convergence on StatusNotifierItem via libappindicator** —
+   Electron Tray, pystray, traypp, and Tauri's tray-icon (our crate, via
+   KeyEcho) all land on the same protocol. The GNOME AppIndicator extension
+   requirement is industry-wide, not an aural defect. `ksni` (our recorded
+   fallback) implements the same protocol without GTK; nothing in the field
+   ships XEmbed or a custom menubar. No change warranted.
+4. **Repeat suppression at source is universal best practice**: KeyEcho
+   filters `XIKeyRepeat` in the event converter; we filter evdev `value=2` plus
+   the pressed-table — parity confirmed.
+5. **Audio-stack convergence validates D1/D6**: KeyEcho independently arrived
+   at symphonia + rodio + pre-decoded caching (our bank is fully pre-decoded
+   and resampled at load — stronger), and Mechvibes' own successor
+   (mechvibes-dx) is an Electron→Rust rewrite. Both reinforce the §4 language
+   decision and the anti-Electron stance.
+6. **Login persistence** is undocumented across the set (Mechvibes uses
+   Electron's auto-launch, i.e. XDG autostart under the hood); our
+   XDG-autostart default and dedicated-user systemd service remain the most
+   explicit approaches surveyed.
+
+### Re-hash triggers added
+
+- If any project demonstrates a **portal-based capture** route (the freedesktop
+  GlobalShortcuts portal covers hotkeys only; no global *capture* portal
+  exists), re-evaluate the evdev choice for a permission-free future path.
+- If PipeWire or WirePlumber tightens cross-UID client access by default, the
+  dedicated-user audio bridge (§11) needs revisiting — tracked in the §11
+  dedicated-user notes.
