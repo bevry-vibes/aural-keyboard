@@ -1,6 +1,6 @@
 [package]
 name = "aural"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "System-wide melodic keyboard sounds: piano for letters, drums for everything else (a port of aural-coding to the OS)"
 repository = "https://github.com/bevry-vibes/aural-keyboard"

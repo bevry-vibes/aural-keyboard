@@ -256,6 +256,14 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
   alternative (file capability `cap_dac_read_search=ep` on the binary — narrower
   deployment, broader file-read exposure if aural is exploited) and the future
   narrowing (Landlock self-restriction of the hook thread's reads).
+- **Packaging: Flatpak considered and deferred.** A sandboxed Flatpak runs as
+  the invoking user with *granted* permissions — input capture would need
+  `--device=input`, i.e. the app itself holds raw `/dev/input` access as the
+  user. That cannot express the dedicated-user isolation model, which is the
+  point of this mode; the daemon therefore stays a native system service.
+  If Flathub distribution is ever wanted, the plausible shape is a Flatpak'd
+  tray/config UI talking to the native daemon via `AURAL_CONFIG_DIR` — the
+  daemon, udev rule, and systemd unit remain native.
 
 ## 9. macOS implementation notes (2026-08-04; macOS 26.6, M1 arm64)
 
