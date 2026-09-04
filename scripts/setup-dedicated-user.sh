@@ -21,6 +21,7 @@
 # Usage:
 #   sudo ./scripts/setup-dedicated-user.sh [path-to-aural-binary]
 #   sudo ./scripts/setup-dedicated-user.sh --uninstall
+#   ./scripts/setup-dedicated-user.sh --verify     (as yourself, after relogin)
 #
 # After setup: log out & back in (group change + env), then
 # `systemctl status aural` and type anywhere.
@@ -31,7 +32,43 @@
 
 set -eu
 
-[ "$(id -u)" -eq 0 ] || { echo "run with sudo: sudo $0 [binary|--uninstall]" >&2; exit 1; }
+# --- part 2: verification (run as yourself after (re)login; no root) ---
+if [ "${1:-}" = "--verify" ]; then
+    pass=0
+    fail=0
+    check() {
+        if eval "$2" >/dev/null 2>&1; then
+            echo "  ok    $1"
+            pass=$((pass + 1))
+        else
+            echo "  FAIL  $1"
+            fail=$((fail + 1))
+        fi
+    }
+    echo "aural dedicated-user verification (as $(id -un)):"
+    check "daemon service is active" "systemctl is-active --quiet aural.service"
+    check "daemon runs as the aural user" "ps -o user= -C aural | grep -qx aural"
+    check "binary carries the unconfined_service_exec_t label" \
+        "ls -Z /usr/local/bin/aural | grep -q unconfined_service_exec_t"
+    check "audio ACL grants aural on your runtime dir" \
+        "getfacl /run/user/$(id -u) 2>/dev/null | grep -q 'user:aural'"
+    check "per-login ACL re-grant unit is enabled" \
+        "systemctl --user is-enabled aural-pipewire-acl.service"
+    check "your session is OUT of the input group" "! id -nG | grep -qw input"
+    check "your session is IN the aural group" "id -nG | grep -qw aural"
+    check "AURAL_CONFIG_DIR is set in this session" "[ -n \"\${AURAL_CONFIG_DIR:-}\" ]"
+    check "shared state dir is writable by you" "test -w /var/lib/aural"
+    if [ "$fail" -eq 0 ]; then
+        echo "all checks passed — type anywhere; tray (optional): aural menubar --no-engine"
+    else
+        echo "$fail check(s) failed — the failing line names the gap; see README"
+        echo "(Dedicated-user mode). Group/env changes need a fresh session."
+        exit 1
+    fi
+    exit 0
+fi
+
+[ "$(id -u)" -eq 0 ] || { echo "run with sudo: sudo $0 [binary|--uninstall]  (or run --verify as yourself)" >&2; exit 1; }
 
 SUDO_USER_NAME="${SUDO_USER:-}"
 [ -n "$SUDO_USER_NAME" ] && [ "$SUDO_USER_NAME" != root ] || {
@@ -62,7 +99,6 @@ if [ "${1:-}" = "--uninstall" ]; then
     echo "==> removing unit, rule, helper, env files, binary"
     rm -f "$UDEV_RULE" "$SERVICE" "$ACL_HELPER" "$ENV_D" "$PROFILE_D" /usr/local/bin/aural
     rm -rf /usr/local/lib/aural
-    semanage fcontext -d /usr/local/bin/aural 2>/dev/null || true
     udevadm control --reload 2>/dev/null || true
     echo "==> removing group membership, user, state"
     gpasswd -d "$SUDO_USER_NAME" aural 2>/dev/null || true
@@ -123,23 +159,6 @@ if [ "$BIN" != "$INSTALL_BIN" ]; then
     install -o root -g root -m 755 "$BIN" "$INSTALL_BIN"
 else
     echo "    (source is the install target — leaving it in place)"
-fi
-
-echo "==> SELinux: let the service domain reach your session's audio sockets"
-if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" = "Enforcing" ]; then
-    # Targeted policy blocks a system-service domain (init_t) from connecting
-    # to user-session pipewire sockets. The standard Fedora remedy is to run
-    # the service as unconfined_service_t — DAC already isolates it (dedicated
-    # user, no groups, systemd sandbox), and the exposure is audio-only.
-    if command -v semanage >/dev/null 2>&1; then
-        semanage fcontext -a -t unconfined_service_exec_t /usr/local/bin/aural 2>/dev/null ||
-            semanage fcontext -m -t unconfined_service_exec_t /usr/local/bin/aural 2>/dev/null || true
-        restorecon -v /usr/local/bin/aural 2>/dev/null || true
-    elif command -v chcon >/dev/null 2>&1; then
-        chcon -t unconfined_service_exec_t /usr/local/bin/aural 2>/dev/null ||
-            echo "  NOTE: could not relabel; install policycoreutils-python-utils and rerun"
-    fi
-    echo "  (service will run as unconfined_service_t; DAC isolation still applies)"
 fi
 
 echo "==> audio bridge helper: $ACL_HELPER"
@@ -204,7 +223,9 @@ TimeoutStartSec=120
 NoNewPrivileges=yes
 ProtectSystem=strict
 ReadWritePaths=$STATE
-ProtectHome=yes
+# read-only (not "yes"): "yes" would hide /run/user entirely — including the
+# pipewire socket the daemon must connect to (XDG_RUNTIME_DIR above).
+ProtectHome=read-only
 PrivateTmp=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
@@ -255,14 +276,22 @@ ExecStart=$ACL_HELPER aural 30
 WantedBy=default.target
 EOF
 chown "$SUDO_USER_NAME:$SUDO_USER_NAME" "$USER_UNIT"
-runuser -u "$SUDO_USER_NAME" -- systemctl --user daemon-reload
-runuser -u "$SUDO_USER_NAME" -- systemctl --user enable --now aural-pipewire-acl.service
+# Under sudo there is no user bus via local transport; --machine connects to
+# the invoking user's systemd --user instance through its bus.
+systemctl --user --machine="$SUDO_USER_NAME@.host" daemon-reload 2>/dev/null || \
+    echo "  NOTE: could not daemon-reload the user manager (log in and run: systemctl --user daemon-reload)"
+systemctl --user --machine="$SUDO_USER_NAME@.host" enable --now aural-pipewire-acl.service 2>/dev/null || \
+    echo "  NOTE: could not enable the per-login re-grant unit (enable it after login: systemctl --user enable --now aural-pipewire-acl.service)"
 
 echo
-echo "installed. remaining steps:"
-echo "  1. log out & back in (applies the aural group + env for your CLI)"
-echo "  2. check: systemctl status aural && ps -o user= -C aural   # -> aural"
-echo "  3. type anywhere; tray (optional): aural menubar --no-engine"
-echo "  4. if silent, check SELinux denials: ausearch -m avc -ts recent | grep aural"
-echo "  5. undo the old input-group grant if you had it: sudo gpasswd -d $SUDO_USER_NAME input"
-echo "     (then log out & back in again — group changes need a fresh session)"
+echo "installed. what works RIGHT NOW (no logout needed):"
+echo "  - sound: the daemon is running as the aural user (systemctl status aural)"
+echo "  - mute hotkey Ctrl+Shift+F12 (the daemon toggles its own shared config)"
+echo "needs a LOG OUT & BACK IN (fresh session picks up groups + env):"
+echo "  - your CLI control: aural mute/volume/status (aural group + AURAL_CONFIG_DIR)"
+echo "  - tray control surface: aural menubar --no-engine"
+echo "  - input isolation for your account: undo the old grant if not done yet:"
+echo "      sudo gpasswd -d $SUDO_USER_NAME input"
+echo "then verify everything end to end (as yourself, no sudo):"
+echo "  ./scripts/setup-dedicated-user.sh --verify"
+echo "if sound is not playing, inspect: journalctl -u aural -n 30 --no-pager"
