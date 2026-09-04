@@ -25,7 +25,8 @@
 use anyhow::{Context, Result};
 
 use tray_icon::menu::{
-    CheckMenuItemBuilder, Menu, MenuEvent, MenuId, MenuItemBuilder, PredefinedMenuItem,
+    CheckMenuItem, CheckMenuItemBuilder, Menu, MenuEvent, MenuId, MenuItemBuilder,
+    PredefinedMenuItem,
 };
 use tray_icon::TrayIconBuilder;
 
@@ -137,6 +138,7 @@ pub fn run(no_engine: bool) -> Result<()> {
     // Poll muda's menu-event channel from the GTK main loop. (Menu clicks are
     // delivered on the main thread; a 50 ms poll is imperceptible for a menu.)
     let menu_rx = MenuEvent::receiver();
+    let last_mtime = std::cell::Cell::new(crate::config::mtime());
     gtk::glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
         while let Ok(event) = menu_rx.try_recv() {
             match handle_event(&event) {
@@ -146,6 +148,18 @@ pub fn run(no_engine: bool) -> Result<()> {
                 }
                 Ok(false) => {}
                 Err(e) => eprintln!("aural menubar: {e:#}"),
+            }
+        }
+        // Keep the Mute checkbox in sync with the shared config: the CLI and
+        // the mute hotkey toggle config.json outside this process (the daemon
+        // itself hot-reloads it within 500 ms — mirror that here). Gated on
+        // mtime so the tick is a stat, not a JSON parse.
+        let mt = crate::config::mtime();
+        if mt != last_mtime.get() {
+            last_mtime.set(mt);
+            let muted = crate::config::load().muted;
+            if menu.mute.is_checked() != muted {
+                menu.mute.set_checked(muted);
             }
         }
         gtk::glib::ControlFlow::Continue
@@ -264,9 +278,15 @@ fn load_icon() -> Result<tray_icon::Icon> {
     Ok(tray_icon::Icon::from_rgba(frame, width, height)?)
 }
 
-/// The parent `Menu` (kept alive so its items' ids stay valid for the session).
+/// The parent `Menu` plus the Mute checkbox handle — the checkbox is kept in
+/// sync with the shared config on Linux (the CLI and mute hotkey change it
+/// outside this process). `include_login` hides "Enable at Login" in
+/// dedicated-user mode, where login persistence belongs to the systemd
+/// service.
 struct AppMenu {
     menu: Menu,
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    mute: CheckMenuItem,
 }
 
 fn build_menu(include_login: bool) -> Result<AppMenu> {
@@ -310,7 +330,7 @@ fn build_menu(include_login: bool) -> Result<AppMenu> {
         .build();
     menu.append(&quit)?;
 
-    Ok(AppMenu { menu })
+    Ok(AppMenu { menu, mute })
 }
 
 // --- doctor window (Open Doctor menu item) ---
