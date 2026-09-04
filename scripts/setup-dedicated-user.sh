@@ -69,12 +69,38 @@ if [ "${1:-}" = "--uninstall" ]; then
     exit 0
 fi
 
-BIN="${1:-$(command -v aural || true)}"
-[ -n "$BIN" ] && [ -x "$BIN" ] || {
-    echo "usage: sudo $0 [path-to-aural-binary]" >&2
-    echo "  (build first: cargo build --release; binary lands in \$CARGO_TARGET_DIR/release/aural)" >&2
-    exit 1
+find_binary() {
+    # 1. explicit argument; 2. root PATH; 3. the invoking user's cargo bin;
+    # 4. the invoking user's cargo target dir (CARGO_TARGET_DIR is invisible
+    # to root, but ~/.cargo/target is its default); 5. the repo's own target.
+    if [ -n "${1:-}" ] && [ -x "${1:-}" ]; then
+        printf '%s\n' "$1"
+        return 0
+    fi
+    for candidate in \
+        "$(command -v aural 2>/dev/null || true)" \
+        "/home/$SUDO_USER_NAME/.cargo/bin/aural" \
+        "/home/$SUDO_USER_NAME/.cargo/target/release/aural" \
+        "$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/target/release/aural"
+    do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
 }
+
+if [ "${1:-}" != "--uninstall" ]; then
+    if ! BIN="$(find_binary "${1:-}")"; then
+        echo "could not find an aural binary. Searched:" >&2
+        echo "  command -v aural, /home/$SUDO_USER_NAME/.cargo/bin/aural," >&2
+        echo "  /home/$SUDO_USER_NAME/.cargo/target/release/aural, <repo>/target/release/aural" >&2
+        echo "build one first (cargo build --release) and pass its path:" >&2
+        echo "  sudo $0 /path/to/aural" >&2
+        exit 1
+    fi
+fi
 BIN="$(readlink -f "$BIN")"
 
 echo "==> creating system user 'aural' (no shell, no groups)"
