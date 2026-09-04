@@ -1,20 +1,26 @@
-//! macOS menubar (NSStatusItem) shell — `aural menubar`.
+//! menubar — `aural menubar`: a tiny tray/menubar shell that hosts the engine
+//! on a worker thread and exposes: `Mute` (check), `Enable at Login` (check),
+//! `Open Doctor`, `Quit`.
 //!
-//! A tiny menu-bar app that hosts the engine on a worker thread and exposes:
-//! `Mute` (check), `Enable at Login` (check), `Open Doctor`, `Quit`. Uses the
-//! `tray-icon` crate (thin around AppKit) so nothing here touches the engine;
-//! the engine stays shell-agnostic per DESIGN.md D8 ("add tray/GUI without
-//! touching any real code").
+//! Both platform shells use the `tray-icon` crate (thin around AppKit on
+//! macOS, GTK + libappindicator on Linux), so the menu construction and event
+//! handling below is shared and nothing here touches the engine; the engine
+//! stays shell-agnostic per DESIGN.md D8 ("add tray/GUI without touching any
+//! real code").
 //!
 //! Threading: the engine (`crate::engine::run`) runs on a worker thread, while
-//! the main thread runs `NSApplication.run()` (which services all run-loop
-//! modes, including the event-tracking mode that NSStatusItem menus run in).
-//! Menu clicks are delivered to a `MenuEvent::set_event_handler` closure that
-//! runs on the main thread, so every `CheckMenuItem`/`TrayIcon` call stays on
-//! the main thread.
+//! the platform UI loop runs on the main thread. Menu clicks are delivered to
+//! the shared [`handle_event`] from the UI thread on both platforms:
 //!
-//! Note on dependencies: only compiled/used on macOS. The `png` crate decodes
-//! the embedded menubar icon once at startup into RGBA for `Icon::from_rgba`.
+//! - macOS: the main thread runs `NSApplication.run()` (which services all
+//!   run-loop modes, including the event-tracking mode that NSStatusItem menus
+//!   run in); clicks arrive via `MenuEvent::set_event_handler`.
+//! - Linux: the main thread runs `gtk::main()`; clicks are polled from muda's
+//!   `MenuEvent::receiver()` crossbeam channel via a glib timeout (50 ms).
+//!
+//! Note on dependencies: only compiled/used on macOS and Linux. The `png`
+//! crate decodes the embedded menubar icon once at startup into RGBA for
+//! `Icon::from_rgba`.
 
 use anyhow::{Context, Result};
 
@@ -29,9 +35,9 @@ const ID_LOGIN: &str = "login";
 const ID_DOCTOR: &str = "doctor";
 const ID_QUIT: &str = "quit";
 
-/// Run the engine on a worker thread and drive the menubar on the main thread.
-///
-/// Blocks the calling (main) thread in `NSApplication.run()` until Quit.
+// --- macOS shell (NSStatusItem via AppKit) ---
+
+#[cfg(target_os = "macos")]
 pub fn run() -> Result<()> {
     // The menubar is a UI shell that only makes sense inside the packaged
     // Aural.app bundle (LSUIElement agent). Refuse to run from a bare binary so
@@ -73,10 +79,10 @@ pub fn run() -> Result<()> {
 
     // Route menu clicks to a main-thread handler. muda auto-toggles the check
     // visuals on macOS, so we only persist the new state to config/plist.
-    MenuEvent::set_event_handler(Some(|event| {
-        if let Err(e) = handle_event(&event) {
-            eprintln!("aural menubar: {e:#}");
-        }
+    MenuEvent::set_event_handler(Some(|event| match handle_event(&event) {
+        Ok(true) => stop_ui(),
+        Ok(false) => {}
+        Err(e) => eprintln!("aural menubar: {e:#}"),
     }));
 
     // Run the AppKit main loop. This services every run-loop mode (including
@@ -90,9 +96,68 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-/// Handle one menu event. On macOS a `CheckMenuItem` auto-toggles itself, so we
-/// read its new state and persist it (config for Mute, LaunchAgent for Login).
-fn handle_event(event: &MenuEvent) -> Result<()> {
+// --- Linux shell (StatusNotifierItem via GTK + libappindicator) ---
+
+#[cfg(target_os = "linux")]
+pub fn run() -> Result<()> {
+    // Engine on a worker thread (same shape as macOS): it installs the evdev
+    // hook (needs the `input` group) and hot-reloads `config.json` for
+    // mute/volume within 500 ms. stderr goes to the log file so failures are
+    // visible when launched from the autostart entry or a tray session.
+    let engine = std::thread::spawn(|| {
+        redirect_stderr_to_log();
+        if let Err(e) = crate::engine::run(false, false, None) {
+            eprintln!("aural menubar: engine error: {e:#}");
+        }
+    });
+
+    let icon = load_icon().context("loading tray icon")?;
+    let menu = build_menu()?;
+
+    // GTK must be initialized (on the main thread) before building the icon.
+    gtk::init().context("initializing GTK (a display server / Wayland session is required)")?;
+
+    // The tray registers as a StatusNotifierItem via libappindicator. GNOME
+    // shows it only with the "AppIndicator and KStatusNotifierItem Support"
+    // extension enabled; `aural doctor` reports when the host is missing.
+    let _tray = TrayIconBuilder::new()
+        .with_tooltip("aural — melodic keyboard sounds")
+        .with_icon(icon)
+        .with_menu(Box::new(menu.menu.clone()))
+        .build()
+        .context("failed to create the tray icon (no StatusNotifier host? — GNOME needs the AppIndicator extension enabled)")?;
+
+    // Poll muda's menu-event channel from the GTK main loop. (Menu clicks are
+    // delivered on the main thread; a 50 ms poll is imperceptible for a menu.)
+    let menu_rx = MenuEvent::receiver();
+    gtk::glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+        while let Ok(event) = menu_rx.try_recv() {
+            match handle_event(&event) {
+                Ok(true) => {
+                    gtk::main_quit();
+                    return gtk::glib::ControlFlow::Break;
+                }
+                Ok(false) => {}
+                Err(e) => eprintln!("aural menubar: {e:#}"),
+            }
+        }
+        gtk::glib::ControlFlow::Continue
+    });
+
+    gtk::main();
+
+    // The loop returned (Quit). Stop the engine and wait for it.
+    crate::engine::request_stop();
+    let _ = engine.join();
+    Ok(())
+}
+
+// --- shared menu logic ---
+
+/// Handle one menu event; returns `true` when Quit was requested. On both
+/// platforms a `CheckMenuItem` auto-toggles itself, so we read the new state
+/// and persist it (config for Mute, autostart entry for Login).
+fn handle_event(event: &MenuEvent) -> Result<bool> {
     match event.id().0.as_str() {
         ID_MUTE => {
             let now_checked = crate::config::load().muted;
@@ -110,51 +175,18 @@ fn handle_event(event: &MenuEvent) -> Result<()> {
             spawn_doctor();
         }
         ID_QUIT => {
-            // `stop:` makes `NSApplication.run()` return so we can clean up.
-            use objc2_app_kit::NSApplication;
-            use objc2_foundation::MainThreadMarker;
-            if let Some(mtm) = MainThreadMarker::new() {
-                NSApplication::sharedApplication(mtm).stop(None);
-            }
+            return Ok(true);
         }
         other => {
             eprintln!("aural menubar: unknown menu id {other:?}");
         }
     }
-    Ok(())
-}
-
-/// Open `aural doctor` in a new Terminal window so the user actually sees the
-/// diagnostics. `aural doctor` is a one-shot that exits, so the script keeps
-/// the window open after it finishes. Uses `open -a Terminal <script>` (plain
-/// LaunchServices) rather than AppleScript, so no Automation ("control
-/// Terminal") permission is required.
-fn spawn_doctor() {
-    let Some(exe) = std::env::current_exe().ok() else {
-        return;
-    };
-    let exe = exe.display().to_string();
-    // A tiny script that runs doctor and keeps the window open afterwards.
-    let script = format!(
-        "#!/bin/sh\n\"{exe}\" doctor\necho\necho \"--- aural doctor finished (press any key to close) ---\"\nread -r _\n"
-    );
-    let dir = crate::config::dir();
-    let script_path = dir.join("aural-doctor.sh");
-    if std::fs::write(&script_path, script).is_err() {
-        return;
-    }
-    // `open -a Terminal <script>` executes the file, so it needs the exec bit.
-    use std::os::unix::fs::PermissionsExt;
-    let _ = std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755));
-    let _ = std::process::Command::new("open")
-        .arg("-a")
-        .arg("Terminal")
-        .arg(&script_path)
-        .spawn();
+    Ok(false)
 }
 
 /// True when the running binary lives inside a `.app` bundle (i.e. the packaged
 /// Aural.app), so the menubar only appears for the GUI agent, not a bare CLI.
+#[cfg(target_os = "macos")]
 fn in_app_bundle() -> bool {
     std::env::current_exe()
         .ok()
@@ -163,8 +195,9 @@ fn in_app_bundle() -> bool {
 }
 
 /// Point this process's stderr at the aural log file. When launched via
-/// `open Aural.app` (LaunchServices), stderr is discarded, so the engine's
-/// diagnostics would be invisible; redirecting lets us read them from the log.
+/// `open Aural.app` (macOS) or the XDG autostart entry (Linux), stderr is
+/// discarded, so the engine's diagnostics would be invisible; redirecting
+/// lets us read them from the log.
 fn redirect_stderr_to_log() {
     use std::os::unix::io::AsRawFd;
     let log = crate::config::dir().join("aural.log");
@@ -180,9 +213,10 @@ fn redirect_stderr_to_log() {
     }
 }
 
-// --- Cocoa helpers (objc2) ---
+// --- Cocoa helpers (macOS) ---
 
 /// `NSApplication sharedApplication`; build once per process main thread.
+#[cfg(target_os = "macos")]
 fn app_main() -> objc2::rc::Retained<objc2_app_kit::NSApplication> {
     use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
     use objc2_foundation::MainThreadMarker;
@@ -191,6 +225,18 @@ fn app_main() -> objc2::rc::Retained<objc2_app_kit::NSApplication> {
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
     app
 }
+
+/// Make `NSApplication.run()` return (Quit menu item).
+#[cfg(target_os = "macos")]
+fn stop_ui() {
+    use objc2_app_kit::NSApplication;
+    use objc2_foundation::MainThreadMarker;
+    if let Some(mtm) = MainThreadMarker::new() {
+        NSApplication::sharedApplication(mtm).stop(None);
+    }
+}
+
+// --- icon ---
 
 /// Decode the embedded PNG (32x32 RGBA) into a `tray_icon::Icon`.
 fn load_icon() -> Result<tray_icon::Icon> {
@@ -251,4 +297,84 @@ fn build_menu() -> Result<AppMenu> {
     menu.append(&quit)?;
 
     Ok(AppMenu { menu })
+}
+
+// --- doctor window (Open Doctor menu item) ---
+
+/// Open `aural doctor` in a visible terminal window so the user actually sees
+/// the diagnostics. `aural doctor` is a one-shot that exits, so the script
+/// keeps the window open after it finishes.
+#[cfg(target_os = "macos")]
+fn spawn_doctor() {
+    let Some(exe) = std::env::current_exe().ok() else {
+        return;
+    };
+    let exe = exe.display().to_string();
+    // A tiny script that runs doctor and keeps the window open afterwards.
+    let script = format!(
+        "#!/bin/sh\n\"{exe}\" doctor\necho\necho \"--- aural doctor finished (press any key to close) ---\"\nread -r _\n"
+    );
+    let dir = crate::config::dir();
+    let script_path = dir.join("aural-doctor.sh");
+    if std::fs::write(&script_path, script).is_err() {
+        return;
+    }
+    // `open -a Terminal <script>` executes the file, so it needs the exec bit.
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755));
+    let _ = std::process::Command::new("open")
+        .arg("-a")
+        .arg("Terminal")
+        .arg(&script_path)
+        .spawn();
+}
+
+/// Linux: write the same doctor script, then try the common terminal
+/// emulators in order (GNOME Terminal first — Fedora/GNOME covers it).
+/// When none is found, run doctor directly with output appended to the log so
+/// the diagnostics are at least not lost.
+#[cfg(target_os = "linux")]
+fn spawn_doctor() {
+    let Some(exe) = std::env::current_exe().ok() else {
+        return;
+    };
+    let exe = exe.display().to_string();
+    let script = format!(
+        "#!/bin/sh\n\"{exe}\" doctor\necho\necho \"--- aural doctor finished (press any key to close) ---\"\nread -r _\n"
+    );
+    let dir = crate::config::dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let script_path = dir.join("aural-doctor.sh");
+    if std::fs::write(&script_path, script).is_err() {
+        return;
+    }
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755));
+    let script_path = script_path.display().to_string();
+    // (terminal binary, arg-prefix before the command)
+    for (term, prefix) in [
+        ("gnome-terminal", vec!["--"]),
+        ("konsole", vec!["-e"]),
+        ("xfce4-terminal", vec!["-e"]),
+        ("xterm", vec!["-e"]),
+    ] {
+        if which(term) {
+            let mut cmd = std::process::Command::new(term);
+            cmd.args(prefix).arg("bash").arg(&script_path);
+            if cmd.spawn().is_ok() {
+                return;
+            }
+        }
+    }
+    // No terminal emulator found: append the diagnostics to the log.
+    if let Ok(out) = std::process::Command::new(&exe).arg("doctor").output() {
+        let _ = std::fs::write(dir.join("aural-doctor.out"), &out.stdout);
+    }
+}
+
+/// Is `bin` on PATH? (no external `which` dependency)
+#[cfg(target_os = "linux")]
+fn which(bin: &str) -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(bin).is_file()))
 }

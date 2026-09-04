@@ -23,15 +23,25 @@ symphonia = { version = "0.6", default-features = false, features = ["ogg", "vor
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# The menubar subsystem is only compiled and exercised on macOS, keeping the
-# Windows/Linux builds free of GUI frameworks (DESIGN.md D8: "add tray/GUI
-# without touching the engine").
+# The menubar/tray subsystem is compiled on macOS and Linux (GTK +
+# libappindicator on Linux, AppKit on macOS), keeping the Windows build free of
+# GUI frameworks (DESIGN.md D8: "add tray/GUI without touching the engine").
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = "0.3"
 objc2-foundation = "0.3"
 png = "0.18"
 tray-icon = "0.24"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Keyboard hook: raw evdev readers over /dev/input/event* (listen-only, no
+# grab) — the only global-capture route that works under both X11 and Wayland.
+evdev = "0.13"
+# Tray shell: gtk feature enables muda/gtk + libappindicator; libxdo (default)
+# is skipped — only the menu separator is used, no clipboard menu items.
+gtk = "0.18"
+png = "0.18"
+tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

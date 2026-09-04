@@ -3,7 +3,7 @@
 //! single-instance. Autostart uses a macOS LaunchAgent (Linux will plug systemd
 //! here later). All state lives under the platform config dir (`config::dir`).
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use anyhow::Context;
 use anyhow::{bail, Result};
 use std::fs::{self, File, OpenOptions};
@@ -204,12 +204,88 @@ fn xml_escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
-#[cfg(not(target_os = "macos"))]
+// --- autostart (Linux XDG autostart) ---
+
+/// The XDG autostart entry path (`~/.config/autostart/com.bevry.aural.desktop`).
+/// GNOME/KDE Plasma (and other freedesktop environments) run these at login —
+/// parity with the Windows Run key / macOS LaunchAgent semantics.
+#[cfg(target_os = "linux")]
+fn desktop_path() -> Result<PathBuf> {
+    let config = std::env::var("XDG_CONFIG_HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".config"))
+        })
+        .context("neither XDG_CONFIG_HOME nor HOME is set")?;
+    Ok(config.join("autostart/com.bevry.aural.desktop"))
+}
+
+/// Escape a path for a Desktop Entry `Exec` value (double-quoted per the
+/// spec). Like the plist's `xml_escape`, only `"` and `\` can appear in a
+/// path and need escaping.
+#[cfg(target_os = "linux")]
+fn exec_quote(s: &str) -> String {
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// Register `aural start` as an XDG autostart entry.
+#[cfg(target_os = "linux")]
+pub fn install() -> Result<()> {
+    let exe = std::env::current_exe()?.display().to_string();
+    let desktop = format!(
+        concat!(
+            "[Desktop Entry]\n",
+            "Type=Application\n",
+            "Name=aural\n",
+            "Comment=System-wide melodic keyboard sounds\n",
+            "Exec={exe} start\n",
+            "Terminal=false\n",
+            "X-GNOME-Autostart-enabled=true\n",
+            "Categories=Utility;Audio;\n"
+        ),
+        exe = exec_quote(&exe)
+    );
+    let path = desktop_path()?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    fs::write(&path, desktop)?;
+    println!(
+        "installed ({}; will start at login via XDG autostart)",
+        path.display()
+    );
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub fn uninstall() -> Result<()> {
+    let path = desktop_path()?;
+    if path.exists() {
+        fs::remove_file(&path)?;
+        println!("removed {}", path.display());
+    } else {
+        println!("not installed");
+    }
+    Ok(())
+}
+
+/// Whether the XDG autostart entry is registered (Linux). Used by the menubar's
+/// "Enable at Login" check state and `aural doctor`.
+#[cfg(target_os = "linux")]
+pub fn login_enabled() -> bool {
+    desktop_path().map(|p| p.exists()).unwrap_or_default()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn install() -> Result<()> {
     bail!("autostart is not implemented for this platform yet")
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn uninstall() -> Result<()> {
     bail!("autostart is not implemented for this platform yet")
 }

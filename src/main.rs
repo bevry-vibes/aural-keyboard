@@ -30,7 +30,7 @@ enum Command {
     Stop,
     /// Is the daemon running?
     Status,
-    /// Start automatically at login (Windows Run key / macOS LaunchAgent)
+    /// Start automatically at login (Windows Run key / macOS LaunchAgent / Linux XDG autostart)
     Install,
     /// Remove from login autostart
     Uninstall,
@@ -50,7 +50,7 @@ enum Command {
     },
     /// Diagnostics: device, buffer, assets, daemon state
     Doctor,
-    /// (macOS) run as a menu-bar app with mute / login / doctor / quit
+    /// (macOS, Linux) run as a tray/menubar app with mute / login / doctor / quit
     Menubar,
     /// Version and sound attribution
     About,
@@ -81,9 +81,9 @@ fn main() -> Result<()> {
         }
         Command::Install => aural::daemon::install(),
         Command::Uninstall => aural::daemon::uninstall(),
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         Command::Menubar => aural::menubar::run(),
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         Command::Menubar => {
             eprintln!("aural menubar: not supported on this platform");
             std::process::exit(1);
@@ -207,5 +207,30 @@ fn doctor() -> Result<()> {
     }
     #[cfg(target_os = "macos")]
     println!("{}", aural::macos::secure_input_check());
+    #[cfg(target_os = "linux")]
+    {
+        println!(
+            "display: {} session on {}",
+            std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "unknown".into()),
+            std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "unknown".into())
+        );
+        if aural::hook::listen_access_granted() {
+            println!("hook: evdev listen-only; /dev/input access: granted");
+        } else {
+            println!(
+                "hook: evdev listen-only; /dev/input access: NOT granted\n  \
+                 → add your user to the input group, then log out and back in:\n    \
+                 sudo usermod -aG input $USER"
+            );
+        }
+        println!(
+            "autostart: {}",
+            if aural::daemon::login_enabled() {
+                "registered (XDG autostart)"
+            } else {
+                "not registered (`aural install`)"
+            }
+        );
+    }
     Ok(())
 }

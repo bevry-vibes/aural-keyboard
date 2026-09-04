@@ -1,4 +1,4 @@
-//! Global keyboard capture: platform backends (`windows`, `macos`) over the shared
+//! Global keyboard capture: platform backends (`windows`, `macos`, `linux`) over the shared
 //! key→trigger logic in this module. The callback only translates keys and pushes
 //! `Trigger`s — it never touches the audio API (DESIGN.md D6). Also owns the global
 //! mute hotkey on the same thread.
@@ -12,6 +12,11 @@ use crossbeam_channel::Sender;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
+
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+pub use self::linux::{listen_access_granted, spawn, stop, HookHandle};
 
 #[cfg(windows)]
 mod windows;
@@ -44,8 +49,8 @@ pub(crate) fn log_keys_enabled() -> bool {
 }
 
 /// Whether the shared pressed-table currently tracks `vk` as held
-/// (macOS uses it to reconcile caps lock).
-#[cfg(target_os = "macos")]
+/// (macOS uses it to reconcile caps lock; Linux for the hotkey chord check).
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn is_pressed(vk: u8) -> bool {
     PRESSED.with(|p| p.get()[vk as usize])
 }
