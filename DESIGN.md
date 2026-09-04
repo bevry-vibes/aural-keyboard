@@ -240,7 +240,19 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
   group-writable `/var/lib/aural`), `alive()` now counts EPERM as alive and
   `stop()` reports it across the uid boundary, and `aural menubar --no-engine`
   turns the tray into a pure control surface (login persistence belongs to the
-  systemd service there). Escape hatches recorded for re-hash: the broad
+  systemd service there). Two hard-won lessons recorded for any future
+  system-service-to-user-session bridge: `ProtectHome=yes` makes `/run/user`
+  **inaccessible (empty)** inside the service namespace — use
+  `ProtectHome=read-only` when the service must reach session sockets
+  (the daemon got ENOENT on the socket, reported as pipewire's `EHOSTDOWN` /
+  "Host is down"), and SELinux was exonerated for that failure empirically
+  (permissive mode changed nothing; zero AVC denials) after an invalid
+  `unconfined_service_exec_t` relabel approach (the type does not exist in
+  Fedora 44 policy — `chcon` returns EINVAL). `--verify` (part 2 of the
+  setup, run as yourself after relogin) checks the whole chain; final setup
+  messaging separates daemon-side effects (immediate) from session-level
+  conveniences (need relogin: group membership and environment.d variables
+  only apply to fresh sessions). Escape hatches recorded for re-hash: the broad
   alternative (file capability `cap_dac_read_search=ep` on the binary — narrower
   deployment, broader file-read exposure if aural is exploited) and the future
   narrowing (Landlock self-restriction of the hook thread's reads).

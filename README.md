@@ -203,6 +203,8 @@ nothing running as you can read `/dev/input` at all:
 sudo ./scripts/setup-dedicated-user.sh [path-to-aural-binary]
 # undo:
 sudo ./scripts/setup-dedicated-user.sh --uninstall
+# after logging out & back in — verify the whole chain (as yourself, no sudo):
+./scripts/setup-dedicated-user.sh --verify
 ```
 
 What it does:
@@ -218,7 +220,14 @@ What it does:
 - shares daemon state with your CLI/tray via `AURAL_CONFIG_DIR=/var/lib/aural`
   (you join the `aural` group), so `aural mute|unmute|toggle|volume|status`,
   the mute hotkey, and the tray all keep working;
-- the tray becomes a control surface: `aural menubar --no-engine`.
+- the tray becomes a control surface: `aural menubar --no-engine`, autostarted
+  at every login via `aural-tray.desktop`.
+
+Everything daemon-side works immediately after setup (sound, mute hotkey);
+your **session-level** conveniences (CLI control, tray Mute persistence, and
+the actual removal of your `input`-group access) need one log out & back in —
+group and environment changes only apply to new sessions. `--verify` names
+exactly which side of that line each requirement is on.
 
 If you previously added yourself to the `input` group, undo it:
 
