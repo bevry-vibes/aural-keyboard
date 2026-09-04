@@ -284,6 +284,9 @@ fn load_icon() -> Result<tray_icon::Icon> {
 /// mode, where login persistence belongs to the systemd service.
 struct AppMenu {
     menu: Menu,
+    // macOS never reads the handle (AppKit auto-toggles the checkbox); it is
+    // still kept so both platforms share the menu construction below.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     mute: CheckMenuItem,
 }
 
