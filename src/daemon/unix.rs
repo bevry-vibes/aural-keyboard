@@ -37,9 +37,14 @@ fn read_pid() -> Option<u32> {
         .and_then(|s| s.trim().parse().ok())
 }
 
-/// Process `pid` exists (any owner).
+/// Process `pid` exists (any owner). EPERM counts as alive: the process is
+/// there but we may not signal it (e.g. a daemon running as another user in
+/// dedicated-user mode).
 fn alive(pid: u32) -> bool {
-    unsafe { libc::kill(pid as i32, 0) == 0 }
+    match unsafe { libc::kill(pid as i32, 0) } {
+        0 => true,
+        _ => std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM),
+    }
 }
 
 fn spawn_detached() -> Result<u32> {
@@ -89,7 +94,17 @@ pub fn start() -> Result<()> {
 pub fn stop() -> Result<()> {
     match read_pid() {
         Some(pid) if alive(pid) => {
-            unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+            let rc = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+            if rc != 0 {
+                let e = std::io::Error::last_os_error();
+                if e.raw_os_error() == Some(libc::EPERM) {
+                    bail!(
+                        "cannot stop pid {pid}: it runs as another user (dedicated-user mode)\n  \
+                         → use systemd instead: sudo systemctl stop aural"
+                    );
+                }
+                return Err(e).context("signaling daemon");
+            }
             let _ = fs::remove_file(pid_path());
             println!("stopped (pid {pid})");
             Ok(())

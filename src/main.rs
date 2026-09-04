@@ -51,7 +51,13 @@ enum Command {
     /// Diagnostics: device, buffer, assets, daemon state
     Doctor,
     /// (macOS, Linux) run as a tray/menubar app with mute / login / doctor / quit
-    Menubar,
+    Menubar {
+        /// Don't host the engine — Linux dedicated-user mode only: the engine
+        /// runs as the `aural` system user via systemd; this tray becomes a
+        /// control surface (Mute via the shared config dir, Open Doctor, Quit)
+        #[arg(long)]
+        no_engine: bool,
+    },
     /// Version and sound attribution
     About,
 }
@@ -82,9 +88,9 @@ fn main() -> Result<()> {
         Command::Install => aural::daemon::install(),
         Command::Uninstall => aural::daemon::uninstall(),
         #[cfg(any(target_os = "macos", target_os = "linux"))]
-        Command::Menubar => aural::menubar::run(),
+        Command::Menubar { no_engine } => aural::menubar::run(no_engine),
         #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-        Command::Menubar => {
+        Command::Menubar { .. } => {
             eprintln!("aural menubar: not supported on this platform");
             std::process::exit(1);
         }
@@ -146,7 +152,7 @@ fn disclaim_needed(cmd: &Command) -> bool {
         Command::Run { stdin: false, .. }
             | Command::Bench { synthetic: None }
             | Command::Doctor
-            | Command::Menubar
+            | Command::Menubar { .. }
     )
 }
 
@@ -219,8 +225,22 @@ fn doctor() -> Result<()> {
         } else {
             println!(
                 "hook: evdev listen-only; /dev/input access: NOT granted\n  \
-                 → add your user to the input group, then log out and back in:\n    \
-                 sudo usermod -aG input $USER"
+                 → either add your user to the input group (log out & back in):\n    \
+                 sudo usermod -aG input $USER\n  \
+                 or run the daemon as a dedicated `aural` user (better isolation):\n    \
+                 sudo ./scripts/setup-dedicated-user.sh   (see README: Dedicated-user mode)"
+            );
+        }
+        if let Some(dir) = std::env::var_os("AURAL_CONFIG_DIR") {
+            println!(
+                "config dir: {} (AURAL_CONFIG_DIR override — dedicated-user mode)",
+                std::path::PathBuf::from(&dir).display()
+            );
+        }
+        if std::path::Path::new("/etc/systemd/system/aural.service").exists() {
+            println!(
+                "dedicated-user service: installed (daemon runs as `aural`; \
+                 control with `systemctl status aural`)"
             );
         }
         println!(

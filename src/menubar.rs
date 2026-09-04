@@ -38,7 +38,10 @@ const ID_QUIT: &str = "quit";
 // --- macOS shell (NSStatusItem via AppKit) ---
 
 #[cfg(target_os = "macos")]
-pub fn run() -> Result<()> {
+pub fn run(no_engine: bool) -> Result<()> {
+    // `--no-engine` is a Linux dedicated-user-mode flag; the macOS menubar
+    // always hosts the engine inside the Aural.app bundle.
+    let _ = no_engine;
     // The menubar is a UI shell that only makes sense inside the packaged
     // Aural.app bundle (LSUIElement agent). Refuse to run from a bare binary so
     // the status item doesn't appear for terminal/CLI usage.
@@ -63,7 +66,7 @@ pub fn run() -> Result<()> {
     });
 
     let icon = load_icon().context("loading menubar icon")?;
-    let menu = build_menu()?;
+    let menu = build_menu(true)?;
 
     // Set up AppKit on the main thread.
     let app = app_main();
@@ -99,20 +102,24 @@ pub fn run() -> Result<()> {
 // --- Linux shell (StatusNotifierItem via GTK + libappindicator) ---
 
 #[cfg(target_os = "linux")]
-pub fn run() -> Result<()> {
-    // Engine on a worker thread (same shape as macOS): it installs the evdev
-    // hook (needs the `input` group) and hot-reloads `config.json` for
-    // mute/volume within 500 ms. stderr goes to the log file so failures are
-    // visible when launched from the autostart entry or a tray session.
-    let engine = std::thread::spawn(|| {
-        redirect_stderr_to_log();
-        if let Err(e) = crate::engine::run(false, false, None) {
-            eprintln!("aural menubar: engine error: {e:#}");
-        }
-    });
+pub fn run(no_engine: bool) -> Result<()> {
+    // With `--no-engine` (dedicated-user mode) the tray is a control surface
+    // only: the engine runs as the `aural` system user via systemd
+    // (scripts/setup-dedicated-user.sh), and Mute works through the shared
+    // AURAL_CONFIG_DIR. stderr stays visible in this mode (no log redirect).
+    let engine = if no_engine {
+        None
+    } else {
+        Some(std::thread::spawn(|| {
+            redirect_stderr_to_log();
+            if let Err(e) = crate::engine::run(false, false, None) {
+                eprintln!("aural menubar: engine error: {e:#}");
+            }
+        }))
+    };
 
     let icon = load_icon().context("loading tray icon")?;
-    let menu = build_menu()?;
+    let menu = build_menu(!no_engine)?;
 
     // GTK must be initialized (on the main thread) before building the icon.
     gtk::init().context("initializing GTK (a display server / Wayland session is required)")?;
@@ -146,9 +153,11 @@ pub fn run() -> Result<()> {
 
     gtk::main();
 
-    // The loop returned (Quit). Stop the engine and wait for it.
+    // The loop returned (Quit). Stop the engine (if hosted) and wait for it.
     crate::engine::request_stop();
-    let _ = engine.join();
+    if let Some(engine) = engine {
+        let _ = engine.join();
+    }
     Ok(())
 }
 
@@ -260,7 +269,7 @@ struct AppMenu {
     menu: Menu,
 }
 
-fn build_menu() -> Result<AppMenu> {
+fn build_menu(include_login: bool) -> Result<AppMenu> {
     let menu = Menu::new();
     let cfg = crate::config::load();
 
@@ -272,13 +281,18 @@ fn build_menu() -> Result<AppMenu> {
         .build();
     menu.append(&mute)?;
 
-    let login = CheckMenuItemBuilder::new()
-        .id(MenuId(ID_LOGIN.to_string()))
-        .text("Enable at Login")
-        .enabled(true)
-        .checked(crate::daemon::login_enabled())
-        .build();
-    menu.append(&login)?;
+    // "Enable at Login" toggles the XDG autostart entry — meaningful only when
+    // this process hosts the engine. In dedicated-user mode login persistence
+    // is owned by the systemd service instead.
+    if include_login {
+        let login = CheckMenuItemBuilder::new()
+            .id(MenuId(ID_LOGIN.to_string()))
+            .text("Enable at Login")
+            .enabled(true)
+            .checked(crate::daemon::login_enabled())
+            .build();
+        menu.append(&login)?;
+    }
 
     menu.append(&PredefinedMenuItem::separator())?;
 

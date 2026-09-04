@@ -27,7 +27,17 @@ impl Default for Config {
     }
 }
 
+/// State dir holding `config.json`, the PID/lock files, and the log.
+/// Overridable via `AURAL_CONFIG_DIR` — dedicated-user mode points both the
+/// systemd daemon (running as the `aural` user) and your own CLI at the same
+/// group-writable dir, so mute/volume/status work across the uid boundary
+/// (see `scripts/setup-dedicated-user.sh`).
 pub fn dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("AURAL_CONFIG_DIR") {
+        if !dir.is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("aural")

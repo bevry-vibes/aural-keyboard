@@ -222,6 +222,23 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
   migrating to ayatana); if it breaks on a future desktop stack, swap the Linux
   shell to `ksni` (pure-Rust StatusNotifierItem over DBus) — the shared menu
   logic is the only part that would change.
+- **Dedicated-user hardening (2026-09-03).** The `input`-group requirement
+  grants every process of the invoking user read access to all input devices;
+  for stricter isolation `scripts/setup-dedicated-user.sh` moves the engine to
+  a `aural` system user: a udev rule ACLs keyboard-only event nodes
+  (`ID_INPUT_KEYBOARD`) to that user (no groups anywhere), a hardened
+  `aural.service` runs the engine, and audio is bridged by granting the user
+  traverse on the session runtime dir at each login — sufficient because
+  Fedora's `pipewire-0` socket is world-rw (verified: `srw-rw-rw-`), so the
+  exposure is audio-only. Shared control flows through a new `AURAL_CONFIG_DIR`
+  override on `config::dir()` (the daemon, the CLI, and the tray point at the
+  group-writable `/var/lib/aural`), `alive()` now counts EPERM as alive and
+  `stop()` reports it across the uid boundary, and `aural menubar --no-engine`
+  turns the tray into a pure control surface (login persistence belongs to the
+  systemd service there). Escape hatches recorded for re-hash: the broad
+  alternative (file capability `cap_dac_read_search=ep` on the binary — narrower
+  deployment, broader file-read exposure if aural is exploited) and the future
+  narrowing (Landlock self-restriction of the hook thread's reads).
 
 ## 9. macOS implementation notes (2026-08-04; macOS 26.6, M1 arm64)
 

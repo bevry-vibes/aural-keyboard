@@ -145,8 +145,11 @@ pub fn spawn(
                     msg.push_str(&format!("\n  first failure: {first}"));
                 }
                 msg.push_str(
-                    "\n  → add your user to the input group, then log out and back in:\n    \
-                     sudo usermod -aG input $USER",
+                    "\n  → either add your user to the input group (log out & back in):\n    \
+                     sudo usermod -aG input $USER\n  \
+                     or run the daemon as a dedicated `aural` user instead (anything running\n    \
+                     as you stays locked out of input):\n    \
+                     sudo ./scripts/setup-dedicated-user.sh   (see README: Dedicated-user mode)",
                 );
                 ready_tx.send(Err(anyhow::anyhow!(msg))).ok();
                 return;

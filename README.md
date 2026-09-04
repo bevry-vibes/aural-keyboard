@@ -192,6 +192,40 @@ gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
 registers an XDG autostart entry (`~/.config/autostart/com.bevry.aural.desktop`)
 so the daemon starts at login.
 
+### Linux: dedicated-user mode (input isolation)
+
+Adding yourself to the `input` group (the quick route above) gives **everything
+running as your account** read access to all input devices. For stricter
+isolation, run the engine as a dedicated `aural` system user instead — then
+nothing running as you can read `/dev/input` at all:
+
+```sh
+sudo ./scripts/setup-dedicated-user.sh [path-to-aural-binary]
+# undo:
+sudo ./scripts/setup-dedicated-user.sh --uninstall
+```
+
+What it does:
+
+- creates a `aural` system user (no shell, no groups) and a udev rule granting
+  **that user** read access to keyboard event nodes only — mice/touchpads stay
+  out of reach even for aural;
+- runs the engine via a hardened `aural.service` (systemd) at login; control it
+  with `systemctl status|start|stop aural` instead of `aural start/stop`;
+- bridges audio by granting the `aural` user traverse on your runtime dir at
+  each login (the pipewire sockets are already world-rw, so this exposes
+  audio only);
+- shares daemon state with your CLI/tray via `AURAL_CONFIG_DIR=/var/lib/aural`
+  (you join the `aural` group), so `aural mute|unmute|toggle|volume|status`,
+  the mute hotkey, and the tray all keep working;
+- the tray becomes a control surface: `aural menubar --no-engine`.
+
+If you previously added yourself to the `input` group, undo it:
+
+```sh
+sudo gpasswd -d $USER input    # then log out & back in
+```
+
 ## Usage
 
 ```text
@@ -208,6 +242,8 @@ aural bench                measure press→sound latency (p50/p95/p99)
 aural doctor               diagnostics: device, buffer, hook, input access, assets
 aural menubar              (macOS, Linux) run as a tray/menubar agent: tray icon with Mute,
                            Enable at Login, Open Doctor, and Quit
+aural menubar --no-engine  (Linux, dedicated-user mode) tray control surface only —
+                           the engine runs as the `aural` system user via systemd
 aural about                version + sound attribution
 ```
 
