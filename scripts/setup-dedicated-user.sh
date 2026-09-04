@@ -48,6 +48,7 @@ USER_UNIT="$USER_UNIT_DIR/aural-pipewire-acl.service"
 ENV_D=/etc/environment.d/50-aural.conf
 PROFILE_D=/etc/profile.d/aural.sh
 STATE=/var/lib/aural
+INSTALL_BIN=/usr/local/bin/aural
 
 if [ "${1:-}" = "--uninstall" ]; then
     echo "==> stopping and disabling aural.service"
@@ -86,6 +87,9 @@ find_binary() {
         "$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/target/release/aural"
     do
         if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            # skip the install target itself: on reruns it is on root PATH,
+            # but installing it onto itself fails and it hides newer builds
+            [ "$(readlink -f "$candidate")" = "$INSTALL_BIN" ] && continue
             printf '%s\n' "$candidate"
             return 0
         fi
@@ -114,8 +118,12 @@ install -d -o aural -g aural -m 2775 "$STATE"
 usermod -aG aural "$SUDO_USER_NAME"
 chown -R aural:aural "$STATE"
 
-echo "==> installing binary to /usr/local/bin/aural"
-install -o root -g root -m 755 "$BIN" /usr/local/bin/aural
+echo "==> installing binary to $INSTALL_BIN"
+if [ "$BIN" != "$INSTALL_BIN" ]; then
+    install -o root -g root -m 755 "$BIN" "$INSTALL_BIN"
+else
+    echo "    (source is the install target — leaving it in place)"
+fi
 
 echo "==> SELinux: let the service domain reach your session's audio sockets"
 if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" = "Enforcing" ]; then
