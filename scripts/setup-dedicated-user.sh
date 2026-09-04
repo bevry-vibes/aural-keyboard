@@ -60,6 +60,8 @@ if [ "${1:-}" = "--uninstall" ]; then
     setfacl -x u:aural "/run/user/$SUDO_UID" 2>/dev/null || true
     echo "==> removing unit, rule, helper, env files, binary"
     rm -f "$UDEV_RULE" "$SERVICE" "$ACL_HELPER" "$ENV_D" "$PROFILE_D" /usr/local/bin/aural
+    rm -rf /usr/local/lib/aural
+    semanage fcontext -d /usr/local/bin/aural 2>/dev/null || true
     udevadm control --reload 2>/dev/null || true
     echo "==> removing group membership, user, state"
     gpasswd -d "$SUDO_USER_NAME" aural 2>/dev/null || true
@@ -114,6 +116,23 @@ chown -R aural:aural "$STATE"
 
 echo "==> installing binary to /usr/local/bin/aural"
 install -o root -g root -m 755 "$BIN" /usr/local/bin/aural
+
+echo "==> SELinux: let the service domain reach your session's audio sockets"
+if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" = "Enforcing" ]; then
+    # Targeted policy blocks a system-service domain (init_t) from connecting
+    # to user-session pipewire sockets. The standard Fedora remedy is to run
+    # the service as unconfined_service_t — DAC already isolates it (dedicated
+    # user, no groups, systemd sandbox), and the exposure is audio-only.
+    if command -v semanage >/dev/null 2>&1; then
+        semanage fcontext -a -t unconfined_service_exec_t /usr/local/bin/aural 2>/dev/null ||
+            semanage fcontext -m -t unconfined_service_exec_t /usr/local/bin/aural 2>/dev/null || true
+        restorecon -v /usr/local/bin/aural 2>/dev/null || true
+    elif command -v chcon >/dev/null 2>&1; then
+        chcon -t unconfined_service_exec_t /usr/local/bin/aural 2>/dev/null ||
+            echo "  NOTE: could not relabel; install policycoreutils-python-utils and rerun"
+    fi
+    echo "  (service will run as unconfined_service_t; DAC isolation still applies)"
+fi
 
 echo "==> audio bridge helper: $ACL_HELPER"
 install -d -o root -g root -m 755 /usr/local/lib/aural
@@ -191,8 +210,19 @@ WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
 systemctl enable --now aural.service
+sleep 2
+if systemctl is-active --quiet aural.service; then
+    echo "==> aural.service is running"
+else
+    echo "==> NOTE: aural.service is not active yet (it retries every 15 s)"
+    echo "    inspect with: journalctl -u aural -n 30 --no-pager"
+    echo "    if you see 'Host is down': check SELinux denials with"
+    echo "      ausearch -m avc -ts recent | grep -i aural"
+fi
 
 echo "==> session env: AURAL_CONFIG_DIR for your CLI and tray"
+install -d -m 755 /etc/environment.d
+install -d -m 755 /etc/profile.d
 cat > "$ENV_D" <<EOF
 # aural dedicated-user mode: CLI/tray share the daemon's state dir
 AURAL_CONFIG_DIR=$STATE
