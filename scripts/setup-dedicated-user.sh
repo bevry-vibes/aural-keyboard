@@ -94,8 +94,9 @@ if [ "${1:-}" = "--uninstall" ]; then
     runuser -u "$SUDO_USER_NAME" -- systemctl --user daemon-reload 2>/dev/null || true
     echo "==> revoking runtime-dir ACL (best effort)"
     setfacl -x u:aural "/run/user/$SUDO_UID" 2>/dev/null || true
-    echo "==> removing unit, rule, helper, env files, binary"
-    rm -f "$UDEV_RULE" "$SERVICE" "$ACL_HELPER" "$ENV_D" "$PROFILE_D" /usr/local/bin/aural
+    echo "==> removing unit, rule, helper, env files, binary, tray autostart"
+    rm -f "$UDEV_RULE" "$SERVICE" "$ACL_HELPER" "$ENV_D" "$PROFILE_D" \
+        "/home/$SUDO_USER_NAME/.config/autostart/aural-tray.desktop" /usr/local/bin/aural
     rm -rf /usr/local/lib/aural
     udevadm control --reload 2>/dev/null || true
     echo "==> removing group membership, user, state"
@@ -259,6 +260,21 @@ cat > "$PROFILE_D" <<EOF
 # aural dedicated-user mode: CLI/tray share the daemon's state dir
 export AURAL_CONFIG_DIR=$STATE
 EOF
+
+echo "==> tray autostart for $SUDO_USER_NAME (aural menubar --no-engine)"
+TRAY_DESKTOP_DIR="/home/$SUDO_USER_NAME/.config/autostart"
+install -d -o "$SUDO_USER_NAME" -g "$SUDO_USER_NAME" "$TRAY_DESKTOP_DIR"
+cat > "$TRAY_DESKTOP_DIR/aural-tray.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=aural tray
+Comment=System-wide melodic keyboard sounds — tray control surface
+Exec=$INSTALL_BIN menubar --no-engine
+Terminal=false
+X-GNOME-Autostart-enabled=true
+Categories=Utility;Audio;
+EOF
+chown "$SUDO_USER_NAME:$SUDO_USER_NAME" "$TRAY_DESKTOP_DIR/aural-tray.desktop"
 
 echo "==> per-login ACL re-grant for $SUDO_USER_NAME (logout/login cycles)"
 install -d -o "$SUDO_USER_NAME" -g "$SUDO_USER_NAME" "$USER_UNIT_DIR"
