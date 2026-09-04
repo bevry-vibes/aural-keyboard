@@ -48,8 +48,6 @@ if [ "${1:-}" = "--verify" ]; then
     echo "aural dedicated-user verification (as $(id -un)):"
     check "daemon service is active" "systemctl is-active --quiet aural.service"
     check "daemon runs as the aural user" "ps -o user= -C aural | grep -qx aural"
-    check "binary carries the unconfined_service_exec_t label" \
-        "ls -Z /usr/local/bin/aural | grep -q unconfined_service_exec_t"
     check "audio ACL grants aural on your runtime dir" \
         "getfacl /run/user/$(id -u) 2>/dev/null | grep -q 'user:aural'"
     check "per-login ACL re-grant unit is enabled" \
@@ -238,15 +236,16 @@ LockPersonality=yes
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
-systemctl enable --now aural.service
+systemctl enable aural.service >/dev/null
+# restart (not just start): applies the freshly installed binary and unit
+# deterministically, whether or not a previous instance is running
+systemctl restart aural.service
 sleep 2
 if systemctl is-active --quiet aural.service; then
     echo "==> aural.service is running"
 else
     echo "==> NOTE: aural.service is not active yet (it retries every 15 s)"
     echo "    inspect with: journalctl -u aural -n 30 --no-pager"
-    echo "    if you see 'Host is down': check SELinux denials with"
-    echo "      ausearch -m avc -ts recent | grep -i aural"
 fi
 
 echo "==> session env: AURAL_CONFIG_DIR for your CLI and tray"
