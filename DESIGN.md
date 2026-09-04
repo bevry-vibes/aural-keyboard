@@ -147,12 +147,13 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
 
 ## 8. Open items pending user feedback
 
-> **Sequencing (ruled 2026-08-04; macOS landed 2026-08-30):** platform parity
-> outranks feature work — the macOS port then the Linux port ship before any of
-> the feature items below (mute-hotkey changes, musical variants, extras) are
-> entertained. The ports themselves change no behavior: existing defaults are
-> carried over as-is. macOS shipped 2026-08-30 (bring-up, §10); **Linux is the
-> remaining port before feature work.**
+> **Sequencing (ruled 2026-08-04; macOS landed 2026-08-30; Linux landed 2026-09-02):**
+> platform parity outranks feature work — the macOS port then the Linux port ship
+> before any of the feature items below (mute-hotkey changes, musical variants,
+> extras) are entertained. The ports themselves change no behavior: existing
+> defaults are carried over as-is. macOS shipped 2026-08-30 (bring-up, §10); Linux
+> shipped 2026-09-02 (bring-up, §11). **All three platforms have landed — feature
+> work is unblocked.**
 
 1. ~~**Commit co-author identity**~~ — resolved: `Co-authored-by: Cline - Kimi K3
    <cline-kimik3@local>` (per bevry `commits.md` known identities); used since the root
@@ -168,8 +169,59 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
    UI shell only. **macOS `aural menubar` shipped 2026-08-31** (this branch) — a
    `tray-icon`-wrapped `NSStatusItem` hosting the engine with native checkboxes:
    **Mute**, **Enable at Login**, **Open Doctor**, and **Quit**; run the engine on a
-   worker thread and pump the AppKit main loop for the menu (no winit/tao). Linux
-   tray still pending (needs gtk/libappindicator); Windows tray optional.
+   worker thread and pump the AppKit main loop for the menu (no winit/tao).
+   **Linux `aural menubar` shipped 2026-09-02** — the same `tray-icon` menu code
+   over GTK + libappindicator (StatusNotifierItem; GNOME needs the AppIndicator
+   extension). Windows tray optional.
+
+## 11. Linux implementation notes (2026-09-02; Fedora 44, GNOME Shell 50.4, Wayland)
+
+- **Hook** — `src/hook/linux.rs`: listen-only evdev readers over
+  `/dev/input/event*`, one per keyboard-class device (a device is a keyboard when
+  it can produce both `KEY_A` and `KEY_SPACE` — excludes power buttons/headphone
+  jacks), driven by one `poll(2)` loop on a dedicated thread. Devices are never
+  grabbed (pass-through parity with the LL hook / listen-only tap). Hotplug: the
+  device set is rescanned every 5 s (poll timeout 250 ms bounds shutdown latency).
+  `Btn_*`/misc codes (0x100+) are filtered out before translation so mouse clicks
+  stay silent; unmapped keyboard codes fall to `VK_UNKNOWN` (default drum).
+- **Why evdev** — GNOME 49+ on Wayland has no X11 fallback and X11 capture
+  (XRecord/XGrabKey) cannot see native Wayland windows, so the X11 route from §6
+  is dead on arrival. evdev sits below the display server and works identically
+  under X11 and Wayland. Price: reading `/dev/input/event*` requires the `input`
+  group (`sudo usermod -aG input $USER` + re-login); `aural doctor` and `spawn`
+  report it. Unlike Win/mac hooks, evdev sees the lock screen (no secure-context
+  silencing) — documented behavior difference.
+- **Key identity** — `src/keycodes.rs` gained an evdev `KEY_*` → VK table
+  (set-1 scancodes are positional; letters US-assumed like macOS; layout-true
+  characters stay deferred with the Windows/macOS refinement, §8 item 4).
+  Unit-tested table (uniqueness, spot checks, hotkey reverse lookup).
+- **Mute hotkey** — detected in the poll loop from the shared pressed-table
+  (evdev reports modifier presses directly, like macOS's flagsChanged); same
+  packed `(mods << 32) | vk` config as macOS. Default unchanged:
+  Ctrl+Shift+F12.
+- **Daemon** — `daemon/unix.rs` is shared POSIX code (setsid detach, PID file,
+  flock single-instance, log redirection) and already worked on Linux;
+  autostart now has a Linux leg: XDG autostart
+  (`~/.config/autostart/com.bevry.aural.desktop` → `aural start`), parity with
+  the Windows Run key / macOS LaunchAgent.
+- **Tray** — `menubar.rs` refactored into shared menu logic + per-platform
+  shells. Linux: `tray-icon` with its `gtk` feature (muda/gtk + libappindicator;
+  `libxdo` disabled — only the separator is used), `gtk::init()` + `gtk::main()`
+  on the main thread, menu events polled from muda's `MenuEvent::receiver()`
+  crossbeam channel via a 50 ms glib timeout. GNOME displays the tray only with
+  the **AppIndicator and KStatusNotifierItem Support** extension
+  (`gnome-shell-extension-appindicator`); `aural doctor` reports when missing.
+  Engine runs on a worker thread exactly as on macOS; the flock single-instance
+  means `aural start` and `aural menubar` exclude each other, as on macOS.
+- **Audio** — cpal 0.18 ALSA backend, engine code unchanged; build dep
+  `alsa-lib-devel`.
+- **CI/release** — `linux` job (ubuntu-22.04: `libappindicator3-dev` is still
+  packaged there; `libasound2-dev`, `libgtk-3-dev`) with the same fmt/clippy/
+  test/build gates; release artifact `aural-linux-x64.tar.gz` + sha256.
+- Known follow-up: `libappindicator` is legacy (GNOME-adjacent stacks are
+  migrating to ayatana); if it breaks on a future desktop stack, swap the Linux
+  shell to `ksni` (pure-Rust StatusNotifierItem over DBus) — the shared menu
+  logic is the only part that would change.
 
 ## 9. macOS implementation notes (2026-08-04; macOS 26.6, M1 arm64)
 

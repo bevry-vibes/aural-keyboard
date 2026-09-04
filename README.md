@@ -27,12 +27,13 @@ immediately discarded — nothing is ever stored or sent anywhere.
 
 ### Status
 
-Windows 10+ and **macOS (Apple Silicon)** are supported from one codebase — see
+Windows 10+, **macOS (Apple Silicon)**, and **Linux (X11 or Wayland)** are supported
+from one codebase — see
 [`DESIGN.md`](DESIGN.md) for the full research, analysis, and decision register.
-macOS support has landed (2026-08-30) including a **menu-bar app**; **Linux is still
-pending** (sequencing in DESIGN.md §8). Live `bench` on Windows 10: **p50 5.5 ms /
-p95 9.4 ms** press→sound, under the 15 ms target. On macOS 26 (M1, CoreAudio,
-128-frame buffer): live bench **p50 1.42 ms / p95 2.49 ms** (n=142).
+macOS support has landed (2026-08-30) including a **menu-bar app**; Linux support has
+landed (2026-09-02) including a **system-tray app**. Live `bench` on Windows 10:
+**p50 5.5 ms / p95 9.4 ms** press→sound, under the 15 ms target. On macOS 26 (M1,
+CoreAudio, 128-frame buffer): live bench **p50 1.42 ms / p95 2.49 ms** (n=142).
 
 ### Research
 
@@ -96,8 +97,14 @@ target\release\aural.exe run
 
 On Windows both the MSVC and GNU host toolchains work; with the GNU toolchain, binutils
 (`dlltool`) must be on PATH for linking. On macOS (Apple Silicon), any recent stable
-toolchain works; see the next section for the one permission the OS requires. Linux
-builds are not wired up yet (see [`DESIGN.md`](DESIGN.md)).
+toolchain works; see the next section for the one permission the OS requires. On Linux,
+install the ALSA + tray build deps first (Fedora):
+
+```sh
+sudo dnf install alsa-lib-devel gtk3-devel libappindicator-gtk3-devel
+```
+
+(Debian/Ubuntu: `sudo apt install libasound2-dev libgtk-3-dev libappindicator3-dev`.)
 
 Quality gates (enforced by CI): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`.
 
@@ -151,6 +158,40 @@ falling back to ad-hoc otherwise.
 
 The menubar icon (`assets/aural-menubar.png`) was created by Microsoft Copilot.
 
+### Linux: input device access (`input` group)
+
+The Linux hook reads the kernel's evdev devices (`/dev/input/event*`) — the only
+global-capture route that works under both X11 and Wayland. Read access requires
+membership in the `input` group:
+
+```sh
+sudo usermod -aG input $USER   # then log out and back in
+```
+
+`aural doctor` reports whether access is granted; `aural run` fails with these
+instructions if it is not. Keys are translated to notes in memory and immediately
+discarded — nothing is logged or stored (see [Usage](#usage)).
+
+Note: evdev sits below the display server, so sounds also play on the lock screen
+(unlike the Windows/macOS hooks, which the OS silences in secure contexts).
+
+### Linux system-tray app
+
+`aural menubar` hosts the engine (daemon) in-process and adds a system-tray icon
+with checkboxes for **Mute** and **Enable at Login**, plus **Open Doctor** and
+**Quit**. It registers a StatusNotifierItem via libappindicator; **GNOME shows it
+only with the "AppIndicator and KStatusNotifierItem Support" extension enabled**:
+
+```sh
+sudo dnf install gnome-shell-extension-appindicator
+# then enable and restart the shell (or log out/in):
+gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
+```
+
+`aural doctor` reports when no StatusNotifier host is present. `aural install`
+registers an XDG autostart entry (`~/.config/autostart/com.bevry.aural.desktop`)
+so the daemon starts at login.
+
 ## Usage
 
 ```text
@@ -161,11 +202,11 @@ aural stop                 stop the daemon
 aural status               is it running?
 aural mute | unmute | toggle
 aural volume 60            set volume (0-100)
-aural install              start automatically at login (Windows Run key / macOS LaunchAgent)
+aural install              start automatically at login (Windows Run key / macOS LaunchAgent / Linux XDG autostart)
 aural uninstall
 aural bench                measure press→sound latency (p50/p95/p99)
-aural doctor               diagnostics: device, buffer, hook, secure input, assets
-aural menubar              (macOS) run as a menu-bar agent: status item with Mute,
+aural doctor               diagnostics: device, buffer, hook, input access, assets
+aural menubar              (macOS, Linux) run as a tray/menubar agent: tray icon with Mute,
                            Enable at Login, Open Doctor, and Quit
 aural about                version + sound attribution
 ```
