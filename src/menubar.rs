@@ -24,10 +24,9 @@
 
 use anyhow::{Context, Result};
 
-#[cfg(target_os = "macos")]
-use tray_icon::menu::CheckMenuItem;
 use tray_icon::menu::{
-    CheckMenuItemBuilder, Menu, MenuEvent, MenuId, MenuItemBuilder, PredefinedMenuItem,
+    CheckMenuItem, CheckMenuItemBuilder, Menu, MenuEvent, MenuId, MenuItemBuilder,
+    PredefinedMenuItem,
 };
 use tray_icon::TrayIconBuilder;
 
@@ -151,17 +150,16 @@ pub fn run(no_engine: bool) -> Result<()> {
                 Err(e) => eprintln!("aural menubar: {e:#}"),
             }
         }
-        // Keep the Mute item in sync with the shared config: the CLI and the
-        // mute hotkey toggle config.json outside this process (the daemon
+        // Keep the Mute checkbox in sync with the shared config: the CLI and
+        // the mute hotkey toggle config.json outside this process (the daemon
         // itself hot-reloads it within 500 ms — mirror that here). Gated on
         // mtime so the tick is a stat, not a JSON parse.
         let mt = crate::config::mtime();
         if mt != last_mtime.get() {
             last_mtime.set(mt);
             let muted = crate::config::load().muted;
-            let want = if muted { "Unmute" } else { "Mute" };
-            if menu.mute.text() != want {
-                menu.mute.set_text(want);
+            if menu.mute.is_checked() != muted {
+                menu.mute.set_checked(muted);
             }
         }
         gtk::glib::ControlFlow::Continue
@@ -280,35 +278,19 @@ fn load_icon() -> Result<tray_icon::Icon> {
     Ok(tray_icon::Icon::from_rgba(frame, width, height)?)
 }
 
-/// The parent `Menu` plus the Mute item handle — on Linux the item's label
-/// flips ("Mute"/"Unmute") in sync with the shared config (the CLI and mute
-/// hotkey change it outside this process); on macOS it stays a classic
-/// check item. `include_login` hides "Enable at Login" in dedicated-user
+/// The parent `Menu` plus the Mute checkbox handle — the checkbox is kept in
+/// sync with the shared config (the CLI and mute hotkey change it outside
+/// this process). `include_login` hides "Enable at Login" in dedicated-user
 /// mode, where login persistence belongs to the systemd service.
 struct AppMenu {
     menu: Menu,
-    #[cfg(target_os = "linux")]
-    mute: tray_icon::menu::MenuItem,
-    #[cfg(target_os = "macos")]
-    #[allow(dead_code)]
-    mute: tray_icon::menu::CheckMenuItem,
+    mute: CheckMenuItem,
 }
 
 fn build_menu(include_login: bool) -> Result<AppMenu> {
     let menu = Menu::new();
     let cfg = crate::config::load();
 
-    // Linux renders mute as a plain action item whose label flips
-    // ("Mute"/"Unmute"): appindicator checkbox rendering is inconsistent
-    // across shells, and an action label is unambiguous. macOS keeps the
-    // classic check item (AppKit renders and auto-toggles it natively).
-    #[cfg(target_os = "linux")]
-    let mute = MenuItemBuilder::new()
-        .id(MenuId(ID_MUTE.to_string()))
-        .text(if cfg.muted { "Unmute" } else { "Mute" })
-        .enabled(true)
-        .build();
-    #[cfg(target_os = "macos")]
     let mute = CheckMenuItemBuilder::new()
         .id(MenuId(ID_MUTE.to_string()))
         .text("Mute")
