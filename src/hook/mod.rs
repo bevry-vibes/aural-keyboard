@@ -31,6 +31,13 @@ pub use self::macos::{listen_access_granted, spawn, stop, HookHandle};
 static HOOK_TX: OnceLock<Sender<Trigger>> = OnceLock::new();
 static HOOK_FLAGS: OnceLock<Arc<SharedFlags>> = OnceLock::new();
 static LOG_KEYS: AtomicBool = AtomicBool::new(false);
+/// Whether caps lock is currently engaged. The sound must reflect the capital
+/// actually written, so this inverts the letter register (see
+/// `mapping::effective_shift`). Backends seed it from ground truth at spawn
+/// (macOS session flags, Linux `EVIOCGLED`, Windows `GetKeyState`) and keep it
+/// synced where the OS reports the state (macOS `flagsChanged`, Linux `EV_LED`);
+/// the toggle in [`handle_key`] covers platforms/sessions that report neither.
+static CAPS_LOCK: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
     // Pressed-key table (VK codes are bytes): shift-state tracking + autorepeat dedup.
@@ -53,6 +60,24 @@ pub(crate) fn log_keys_enabled() -> bool {
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn is_pressed(vk: u8) -> bool {
     PRESSED.with(|p| p.get()[vk as usize])
+}
+
+/// Sync caps-lock state to the OS-reported truth (macOS `flagsChanged`, Linux
+/// `EV_LED`, Windows `GetKeyState` at spawn). Beats a desynced toggle.
+pub(crate) fn set_caps_lock(on: bool) {
+    if CAPS_LOCK.swap(on, Ordering::Relaxed) != on && log_keys_enabled() {
+        eprintln!("aural: caps lock {}", if on { "on" } else { "off" });
+    }
+}
+
+/// Flip caps-lock state (fallback where the OS does not report it).
+fn toggle_caps_lock() {
+    let on = !CAPS_LOCK.load(Ordering::Relaxed);
+    set_caps_lock(on);
+}
+
+pub(crate) fn caps_lock_on() -> bool {
+    CAPS_LOCK.load(Ordering::Relaxed)
 }
 
 /// Shared key handling: pressed-table upkeep, autorepeat dedup, mapping, trigger send.
@@ -85,10 +110,19 @@ pub(crate) fn handle_key(vk: u8, is_up: bool) {
     if already_down {
         return; // held-key autorepeat: original ignores these
     }
-    if let Some(note) = mapping::map_key(vk, shift_down) {
+    // Caps lock toggles on its key-down (deduped above, so holds/repeats flip once).
+    // Backends override this with OS-reported truth when they have it.
+    if vk == mapping::VK_CAPITAL {
+        toggle_caps_lock();
+    }
+    // The sound reflects the capital actually written: caps lock swaps the letter
+    // registers (plain → high, shift → plain); non-letters keep their shift sounds.
+    let caps = caps_lock_on();
+    let shift = mapping::effective_shift(vk, shift_down, caps);
+    if let Some(note) = mapping::map_key(vk, shift) {
         if log_keys_enabled() {
             eprintln!(
-                "aural: key {vk:#04x} (shift={shift_down}) → {:?} midi {} vel {}",
+                "aural: key {vk:#04x} (shift={shift_down}, caps={caps}) → {:?} midi {} vel {}",
                 note.instrument, note.midi, note.velocity
             );
         }
@@ -204,5 +238,73 @@ pub(crate) fn toggle_mute() {
         f.muted.store(now, Ordering::Relaxed);
         let _ = crate::config::update(|c| c.muted = now);
         eprintln!("aural: {}", if now { "muted" } else { "unmuted" });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mixer::SharedFlags;
+
+    fn note_ons(rx: &crossbeam_channel::Receiver<Trigger>) -> Vec<Trigger> {
+        let mut out = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            if matches!(ev, Trigger::NoteOn { .. }) {
+                out.push(ev);
+            }
+        }
+        out
+    }
+
+    fn midi_of(t: &Trigger) -> u8 {
+        match t {
+            Trigger::NoteOn { midi, .. } => *midi,
+            _ => panic!("expected NoteOn, got {t:?}"),
+        }
+    }
+
+    #[test]
+    fn caps_lock_swaps_letter_registers_end_to_end() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        init(tx, Arc::new(SharedFlags::new(1.0, false)));
+        set_caps_lock(false); // isolate from any prior state
+        let _ = note_ons(&rx);
+
+        // Caps on (its own key press plays the default drum, like the original).
+        handle_key(mapping::VK_CAPITAL, false);
+        assert_eq!(midi_of(&note_ons(&rx)[0]), 45);
+        handle_key(mapping::VK_CAPITAL, true);
+        let _ = note_ons(&rx);
+
+        // Plain letter under caps → the shifted (high) register.
+        handle_key(mapping::VK_A, false);
+        handle_key(mapping::VK_A, true);
+        assert_eq!(midi_of(&note_ons(&rx)[0]), 82);
+
+        // Shift+letter under caps → the plain (low) register.
+        handle_key(mapping::VK_LSHIFT, false);
+        handle_key(mapping::VK_A, false);
+        handle_key(mapping::VK_A, true);
+        handle_key(mapping::VK_LSHIFT, true);
+        assert_eq!(midi_of(&note_ons(&rx)[0]), 62);
+
+        // Non-letters keep their shift sounds under caps ('!' still crashes).
+        handle_key(mapping::VK_1, false);
+        handle_key(mapping::VK_1, true);
+        let _ = note_ons(&rx);
+        handle_key(mapping::VK_LSHIFT, false);
+        handle_key(mapping::VK_1, false);
+        handle_key(mapping::VK_1, true);
+        handle_key(mapping::VK_LSHIFT, true);
+        assert_eq!(midi_of(&note_ons(&rx)[0]), 54);
+
+        // Caps off restores the original registers.
+        handle_key(mapping::VK_CAPITAL, false);
+        handle_key(mapping::VK_CAPITAL, true);
+        let _ = note_ons(&rx);
+        handle_key(mapping::VK_A, false);
+        handle_key(mapping::VK_A, true);
+        assert_eq!(midi_of(&note_ons(&rx)[0]), 62);
+        set_caps_lock(false);
     }
 }

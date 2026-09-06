@@ -3,14 +3,15 @@
 //! Also owns the global mute hotkey (`RegisterHotKey`) on the same thread's
 //! message loop.
 
-use super::{handle_key, init, toggle_mute};
+use super::{handle_key, init, set_caps_lock, toggle_mute};
+use crate::mapping;
 use crate::mixer::{SharedFlags, Trigger};
 use anyhow::{Context, Result};
 use crossbeam_channel::Sender;
 use std::sync::Arc;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS,
+    GetKeyState, RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -47,6 +48,10 @@ pub fn spawn(
     let (ready_tx, ready_rx) = crossbeam_channel::bounded::<Result<u32>>(0);
     std::thread::spawn(move || {
         init(tx, flags);
+        // Seed caps-lock from the toggle bit (GetKeyState), so a session that
+        // starts with caps already on inverts letters from the first keystroke.
+        // Each caps press then toggles it in `handle_key`.
+        set_caps_lock((unsafe { GetKeyState(mapping::VK_CAPITAL as i32) } & 1) != 0);
         unsafe {
             let hook = match SetWindowsHookExW(
                 WH_KEYBOARD_LL,

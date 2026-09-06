@@ -12,7 +12,7 @@
 //! Hotplug: the device set is rescanned every 5 s, so keyboards connected
 //! later are picked up without a restart.
 
-use super::{handle_key, init, is_pressed, toggle_mute};
+use super::{handle_key, init, is_pressed, set_caps_lock, toggle_mute};
 use crate::keycodes;
 use crate::mapping;
 use crate::mixer::{SharedFlags, Trigger};
@@ -157,6 +157,18 @@ pub fn spawn(
             for (_, device) in &mut devices {
                 let _ = device.set_nonblocking(true);
             }
+            // Seed caps-lock from the kernel LED state (EVIOCGLED), so a session
+            // that starts with caps already on inverts letters from the first
+            // keystroke. EV_LED events keep it synced once running (with a
+            // toggle on caps key-down as the fallback when none arrive).
+            for (_, device) in &devices {
+                if let Ok(leds) = device.get_led_state() {
+                    if leds.contains(evdev::LedCode::LED_CAPSL) {
+                        set_caps_lock(true);
+                        break;
+                    }
+                }
+            }
             eprintln!(
                 "aural: watching {} keyboard device{} via evdev (listen-only){}",
                 devices.len(),
@@ -279,6 +291,12 @@ fn rescan(devices: &mut Vec<(PathBuf, Device)>) {
 fn process(event: evdev::InputEvent) {
     let (code, value) = match event.destructure() {
         EventSummary::Key(_key_event, code, value) => (code.0, value),
+        // Caps-lock LED events are OS ground truth when the desktop delivers
+        // them (not all do — `handle_key`'s toggle is the fallback).
+        EventSummary::Led(_, code, value) if code == evdev::LedCode::LED_CAPSL => {
+            set_caps_lock(value != 0);
+            return;
+        }
         _ => return, // SYN/REL/ABS/etc. — only KEY events matter to us
     };
     if !keycodes::is_evdev_key(code) {

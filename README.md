@@ -10,7 +10,7 @@ quietly, backspace cracks, `!` crashes). No mechanical-keyboard sounds, by desig
 
 | Key | Sound |
 |---|---|
-| `a`–`z` | grand piano, walking up the scale (shifted = one register higher) |
+| `a`–`z` | grand piano, walking up the scale (shift = one register higher; caps lock swaps the registers so the sound matches the capital written) |
 | space | deep drum, whisper-quiet (velocity 0.025) |
 | backspace / delete | punchy toms (velocity 1.0) |
 | `[` `]` `(` `)` | kick/snare family (GM percussion mapping) |

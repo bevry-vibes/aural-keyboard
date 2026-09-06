@@ -109,7 +109,13 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
   (majorScaleNotes[24..47]). Drum notes: C2,Db2,D2,Eb2,F2,A2,Db3,D3,Gb3,Ab3,A3,Bb3,Db4
   (MIDI 36,37,38,39,41,45,49,50,54,56,57,58,61).
 - **Mapping:** verbatim port (§3); v1 VK-based (letters+shift layout-safe; symbols
-  US-assumed); v1.1 `ToUnicodeEx` for layout-true characters.
+  US-assumed); v1.1 `ToUnicodeEx` for layout-true characters. v1.2 caps-lock awareness
+  (deviation from the original): caps lock swaps the letter registers — with caps on,
+  plain letters take the shifted (higher) register and shift+letters the plain one, so
+  the sound reflects the capital actually written; non-letters keep their shift sounds
+  (`mapping::effective_shift`; state seeded from macOS session flags / Linux
+  `EVIOCGLED` / Windows `GetKeyState`, kept synced by macOS `flagsChanged` and Linux
+  `EV_LED`, with a toggle on caps key-down as the fallback).
 - **CLI:** `run`, `start/stop/status` (PID file), `install/uninstall` (Run key),
   `mute/unmute/toggle` (+ configurable global hotkey, default Ctrl+Shift+F12),
   `volume`, `bench` (p50/p95/p99 hook→mix), `doctor`, `about`.

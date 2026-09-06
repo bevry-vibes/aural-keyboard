@@ -53,6 +53,7 @@ pub const VK_CONTROL: u8 = 0x11;
 pub const VK_MENU: u8 = 0x12; // Alt
 pub const VK_SPACE: u8 = 0x20;
 pub const VK_DELETE: u8 = 0x2E;
+pub const VK_CAPITAL: u8 = 0x14; // Caps Lock
 pub const VK_0: u8 = 0x30;
 pub const VK_1: u8 = 0x31;
 pub const VK_9: u8 = 0x39;
@@ -146,6 +147,14 @@ pub fn is_modifier(vk: u8) -> bool {
             | VK_LMENU
             | VK_RMENU
     )
+}
+
+/// The effective shift for a key press: caps lock swaps the letter registers so the
+/// sound reflects the capital actually written — with caps on, plain letters take the
+/// shifted (higher) register and shift+letters the plain one. Only letters are
+/// affected (caps lock never changes what digits/symbols produce).
+pub fn effective_shift(vk: u8, shift: bool, caps_lock: bool) -> bool {
+    shift ^ (caps_lock && (VK_A..=VK_Z).contains(&vk))
 }
 
 fn drum(midi: u8, velocity: f32) -> Option<MappedNote> {
@@ -273,6 +282,21 @@ mod tests {
         );
         assert_eq!(note(VK_9, true).midi, 38);
         assert_eq!(note(VK_0, true).midi, 39);
+    }
+
+    #[test]
+    fn caps_lock_inverts_only_letters() {
+        // Caps on: plain letters take the shift register, shift+letters the plain one.
+        assert!(!effective_shift(VK_A, false, false));
+        assert!(effective_shift(VK_A, false, true));
+        assert!(effective_shift(VK_A, true, false));
+        assert!(!effective_shift(VK_A, true, true));
+        // Non-letters are never affected by caps lock.
+        assert!(!effective_shift(VK_1, false, true));
+        assert!(effective_shift(VK_1, true, true));
+        assert!(!effective_shift(VK_OEM_PERIOD, false, true));
+        assert!(!effective_shift(VK_SPACE, false, true));
+        assert!(!effective_shift(VK_CAPITAL, false, true));
     }
 
     #[test]

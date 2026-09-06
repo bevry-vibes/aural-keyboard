@@ -4,8 +4,9 @@
 //! (pass-through parity with the Windows LL hook) and need only the Input
 //! Monitoring permission, not Accessibility.
 
-use super::{handle_key, init, is_pressed, log_keys_enabled, toggle_mute};
+use super::{handle_key, init, is_pressed, log_keys_enabled, set_caps_lock, toggle_mute};
 use crate::keycodes;
+use crate::mapping;
 use crate::mixer::{SharedFlags, Trigger};
 use anyhow::{Context, Result};
 use crossbeam_channel::Sender;
@@ -64,6 +65,7 @@ extern "C" {
     fn CGEventTapIsEnabled(tap: CFMachPortRef) -> bool;
     fn CGEventGetIntegerValueField(event: CGEventRef, field: u32) -> i64;
     fn CGEventGetFlags(event: CGEventRef) -> u64;
+    fn CGEventSourceFlagsState(state_id: i32) -> u64;
 }
 
 // Input Monitoring permission (TCC), introduced in macOS 10.15 as
@@ -183,11 +185,14 @@ fn modifier_pressed(keycode: u16, flags: u64) -> bool {
 
 /// Reconcile caps lock: releases only arrive when it turns off, so a down with
 /// no matching up (e.g. granted mid-hold) is dropped to avoid a stuck key.
+/// The post-transition flags are ground truth, so they also seed the shared
+/// caps-lock state that swaps the letter registers.
 fn sync_caps_lock(flags: u64) {
     let on = flags & CG_EVENT_FLAG_MASK_ALPHA_SHIFT != 0;
-    let tracked = is_pressed(0x14); // VK_CAPITAL
+    set_caps_lock(on);
+    let tracked = is_pressed(mapping::VK_CAPITAL);
     if on != tracked {
-        handle_key(0x14, !on);
+        handle_key(mapping::VK_CAPITAL, !on);
     }
 }
 
@@ -249,6 +254,11 @@ pub fn spawn(
     );
     let thread = std::thread::spawn(move || {
         init(tx, flags);
+        // Seed caps-lock from the session's live modifier flags, so a session
+        // that starts with caps already on inverts letters from the first
+        // keystroke (kCGEventSourceStateCombinedSessionState = 0).
+        let session_flags = unsafe { CGEventSourceFlagsState(0) };
+        set_caps_lock(session_flags & CG_EVENT_FLAG_MASK_ALPHA_SHIFT != 0);
         // Gate on TCC first: on macOS 26, CGEventTapCreate can succeed yet
         // deliver no events when permission is missing (a "deaf" tap), so a
         // null check alone would run silently deaf. If missing, request it and
