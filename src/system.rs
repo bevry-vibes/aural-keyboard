@@ -4,8 +4,8 @@
 //! What "installed" means per platform:
 //!
 //! - **macOS** — `~/Applications/Aural.app`: a copy of this binary, bundled (`LSUIElement`, so no Dock icon) and code-signed.
-//! The menu-bar app only runs from a bundle, and macOS's Input Monitoring grant keys to the bundle's "Aural" identity — a stable signature keeps the grant valid across reinstalls (DESIGN.md §12).
-//! A LaunchAgent starts it at login.
+//!   The menu-bar app only runs from a bundle, and macOS's Input Monitoring grant keys to the bundle's "Aural" identity — a stable signature keeps the grant valid across reinstalls (DESIGN.md §12).
+//!   A LaunchAgent starts it at login.
 //! - **Linux** — the tray app (`menubar`: engine + StatusNotifierItem icon), started at login by an XDG autostart entry.
 //! - **Windows** — the background daemon, started at login by the registry Run key (no tray yet).
 
