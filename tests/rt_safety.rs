@@ -1,4 +1,4 @@
-//! RT-safety proof: the render path must never allocate (DESIGN.md §5, D6).
+//! RT-safety proof: the render path must never allocate (DESIGN.md §5; D6, §7).
 //! Runs in its own test binary so the counting allocator sees only this test.
 
 use std::alloc::{GlobalAlloc, Layout, System};

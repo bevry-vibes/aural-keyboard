@@ -1,4 +1,4 @@
-//! The real-time voice-pool mixer (DESIGN.md §5, decision D6).
+//! The real-time voice-pool mixer (DESIGN.md §5; decision D6, §7).
 //!
 //! Lives entirely inside the audio callback: no allocation, no locks, no I/O.
 //! Triggers arrive over a crossbeam channel from the keyboard-hook thread and are

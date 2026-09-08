@@ -2,13 +2,13 @@
 //! Secure Event Input probe used by `aural system doctor`.
 //!
 //! macOS grants Input Monitoring to the *responsible process* — normally the
-//! app that launched us (DESIGN.md §10 learning #1), so a terminal-launched
+//! app that launched us (DESIGN.md §11), so a terminal-launched
 //! run is attributed to the terminal. Terminal.app/iTerm2 break that
 //! inheritance with the private `responsibility_spawnattrs_setdisclaim`
 //! posix_spawn attribute, making the spawned process its own responsible app.
 //! We do the same by re-exec'ing ourselves: the re-exec'd process is its own
 //! responsible process, so the TCC prompt and grant key to aural itself
-//! (DESIGN.md §10, "Blocker 2").
+//! (DESIGN.md §11).
 
 use anyhow::Result;
 use std::ffi::CString;
@@ -224,7 +224,7 @@ fn code_signing_identifier() -> Option<String> {
 
 /// True while any app holds "Secure Event Input": macOS withholds keyDown/keyUp
 /// from ALL event taps system-wide (only flagsChanged leaks) until it is
-/// released (DESIGN.md §10). Loaded from HIToolbox — the Carbon subframework
+/// released (DESIGN.md §12). Loaded from HIToolbox — the Carbon subframework
 /// path; the old ApplicationServices path is gone on macOS 26.
 pub fn secure_input_enabled() -> bool {
     type SeiFn = unsafe extern "C" fn() -> bool;

@@ -2,7 +2,7 @@
 //! `scripts/setup-dedicated-user.sh`, so `cargo install aural && aural system
 //! install` is the whole setup: no repo checkout, no helper scripts, just one
 //! sudo prompt. File contents below are equivalent to the proven script;
-//! DESIGN.md §11 records the lessons baked into them (`ProtectHome=read-only`
+//! DESIGN.md §13 records the lessons baked into them (`ProtectHome=read-only`
 //! or the pipewire socket disappears, EPERM counts as alive, the pipewire
 //! sockets are already world-rw so the audio bridge exposes audio only).
 //!
@@ -524,7 +524,7 @@ const UDEV_RULE_CONTENT: &str = concat!(
 );
 
 /// The hardened engine unit — `ProtectHome=read-only` (not "yes": that hides
-/// /run/user entirely, including the pipewire socket; see DESIGN.md §11).
+/// /run/user entirely, including the pipewire socket; see DESIGN.md §13).
 fn service_content(uid: u32) -> String {
     format!(
         concat!(

@@ -105,7 +105,7 @@ gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com   # then restart 
 
 Without systemd the install falls back to the simple mode: your user joins
 the `input` group and the tray hosts the engine. Details and security notes:
-[DESIGN.md](DESIGN.md) (§11).
+[DESIGN.md](DESIGN.md) (§13).
 
 ## Usage
 
