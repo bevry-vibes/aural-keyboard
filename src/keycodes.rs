@@ -1,20 +1,15 @@
-//! Hardware keycode → Windows VK translation, so the rest of the engine keeps
-//! using VK codes as the cross-platform key identity (`mapping.rs`).
+//! Hardware keycode → Windows VK translation, so the rest of the engine keeps using VK codes as the cross-platform key identity (`mapping.rs`).
 //!
 //! - macOS: `CGKeyCode` (positional US ANSI from HIToolbox `kVK_*` constants).
-//! - Linux: evdev `KEY_*` codes (`linux/input-event-codes.h`), which are
-//!   positional (set 1 scancodes); v1 assumes a US layout for letters on both.
+//! - Linux: evdev `KEY_*` codes (`linux/input-event-codes.h`), which are positional (set 1 scancodes); v1 assumes a US layout for letters on both.
 //!
-//! Layout-true characters (`UCKeyTranslate` on macOS, `ToUnicodeEx` on Windows,
-//! XKB on Linux) are deferred (DESIGN.md §8).
+//! Layout-true characters (`UCKeyTranslate` on macOS, `ToUnicodeEx` on Windows, XKB on Linux) are deferred (DESIGN.md §8).
 
-/// VK for "unknown/unmapped macOS keycode". Plays the default drum like any
-/// other unmapped key; all unknowns share one voice key for NoteOff pairing
-/// (acceptable: rare keys, and Windows lumps them into the same drum anyway).
+/// VK for "unknown/unmapped macOS keycode".
+/// Plays the default drum like any other unmapped key; all unknowns share one voice key for NoteOff pairing (acceptable: rare keys, and Windows lumps them into the same drum anyway).
 pub const VK_UNKNOWN: u8 = 0xFF;
 
-/// `(CGKeyCode, Windows VK)` pairs. Keycodes are the `kVK_*` constants from
-/// HIToolbox `Events.h` (ANSI positional); VKs match `mapping.rs`.
+/// `(CGKeyCode, Windows VK)` pairs. Keycodes are the `kVK_*` constants from HIToolbox `Events.h` (ANSI positional); VKs match `mapping.rs`.
 #[cfg(target_os = "macos")]
 const PAIRS: &[(u16, u8)] = &[
     // Letters (positional, US ANSI)
@@ -152,16 +147,13 @@ static TABLE: [u8; 256] = {
     t
 };
 
-/// Translate a macOS CGKeyCode to the Windows VK key identity.
-/// Unknown keycodes (e.g. JIS-only keys) map to [`VK_UNKNOWN`].
+/// Translate a macOS CGKeyCode to the Windows VK key identity. Unknown keycodes (e.g. JIS-only keys) map to [`VK_UNKNOWN`].
 #[cfg(target_os = "macos")]
 pub fn vk_for_keycode(keycode: u16) -> u8 {
     TABLE.get(keycode as usize).copied().unwrap_or(VK_UNKNOWN)
 }
 
-/// Reverse lookup (config hotkey VK → CGKeyCode). Returns `None` for VKs with
-/// no macOS counterpart; the one ambiguous pair (Return/KeypadEnter) resolves
-/// to Return.
+/// Reverse lookup (config hotkey VK → CGKeyCode). Returns `None` for VKs with no macOS counterpart; the one ambiguous pair (Return/KeypadEnter) resolves to Return.
 #[cfg(target_os = "macos")]
 pub fn keycode_for_vk(vk: u8) -> Option<u16> {
     PAIRS.iter().find(|&&(_, v)| v == vk).map(|&(k, _)| k)
@@ -169,10 +161,9 @@ pub fn keycode_for_vk(vk: u8) -> Option<u16> {
 
 // --- Linux: evdev KEY_* codes (linux/input-event-codes.h) ---
 
-/// `(evdev KEY code, Windows VK)` pairs. The codes are positional (set 1
-/// scancodes), so letters are US-layout-assumed like macOS. All codes here are
-/// ≤ 255 or in the F13–F24 block (183–194); mouse/touch `BTN_*` events (0x100+)
-/// fall outside [`is_evdev_key`] and are ignored entirely by the hook.
+/// `(evdev KEY code, Windows VK)` pairs.
+/// The codes are positional (set 1 scancodes), so letters are US-layout-assumed like macOS.
+/// All codes here are ≤ 255 or in the F13–F24 block (183–194); mouse/touch `BTN_*` events (0x100+) fall outside [`is_evdev_key`] and are ignored entirely by the hook.
 #[cfg(target_os = "linux")]
 const EV_PAIRS: &[(u16, u8)] = &[
     // Letters (positional, US)
@@ -315,24 +306,21 @@ static EV_TABLE: [u8; 256] = {
     t
 };
 
-/// Whether an evdev `KEY_*` code is a keyboard key at all (vs mouse buttons,
-/// touch, and other `BTN_*`/misc codes the hook must stay silent on). Keyboard
-/// codes live in 1..=127 (the classic set-1 block) plus the F13–F24 block.
+/// Whether an evdev `KEY_*` code is a keyboard key at all (vs mouse buttons, touch, and other `BTN_*`/misc codes the hook must stay silent on).
+/// Keyboard codes live in 1..=127 (the classic set-1 block) plus the F13–F24 block.
 #[cfg(target_os = "linux")]
 pub fn is_evdev_key(code: u16) -> bool {
     (1..=127).contains(&code) || (0xB7..=0xC2).contains(&code)
 }
 
 /// Translate an evdev `KEY_*` code to the Windows VK key identity.
-/// Unknown keyboard codes map to [`VK_UNKNOWN`] (default drum); non-keyboard
-/// codes are filtered by [`is_evdev_key`] before this is called.
+/// Unknown keyboard codes map to [`VK_UNKNOWN`] (default drum); non-keyboard codes are filtered by [`is_evdev_key`] before this is called.
 #[cfg(target_os = "linux")]
 pub fn vk_for_evdev(code: u16) -> u8 {
     EV_TABLE.get(code as usize).copied().unwrap_or(VK_UNKNOWN)
 }
 
-/// Reverse lookup (config hotkey VK → evdev KEY code). Returns `None` for VKs
-/// with no Linux counterpart; the ambiguous Return pair resolves to Enter.
+/// Reverse lookup (config hotkey VK → evdev KEY code). Returns `None` for VKs with no Linux counterpart; the ambiguous Return pair resolves to Enter.
 #[cfg(target_os = "linux")]
 pub fn evdev_for_vk(vk: u8) -> Option<u16> {
     EV_PAIRS.iter().find(|&&(_, v)| v == vk).map(|&(k, _)| k)

@@ -20,8 +20,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Manage the installed app: install/uninstall, login autostart, mute,
-    /// diagnostics
+    /// Manage the installed app: install/uninstall, login autostart, mute, diagnostics
     #[command(subcommand_required = true, arg_required_else_help = true)]
     System {
         #[command(subcommand)]
@@ -33,9 +32,7 @@ enum Command {
 
 #[derive(Subcommand)]
 enum SystemAction {
-    /// Install the app (menu-bar/tray entry, or the background daemon on
-    /// Windows), handling the permissions it needs, then start it now and at
-    /// every login
+    /// Install the app (menu-bar/tray entry, or the background daemon on Windows), handling the permissions it needs, then start it now and at every login
     Install,
     /// Stop the app and remove everything the install created
     Uninstall,
@@ -62,17 +59,14 @@ enum SystemAction {
     /// Version and sound attribution
     About,
 
-    // Hidden internal commands — the install machinery invokes these across a
-    // process boundary (login entries, the detached spawner, systemd units);
-    // they are not for users.
+    // Hidden internal commands — the install machinery invokes these across a process boundary (login entries, the detached spawner, systemd units); they are not for users.
     /// (internal) the engine in background-daemon mode
     #[command(hide = true)]
     Daemon,
     /// (internal) the menu-bar/tray app
     #[command(hide = true)]
     Tray,
-    /// (internal) wait for the session's pipewire socket, then grant the
-    /// dedicated engine user audio access (Linux)
+    /// (internal) wait for the session's pipewire socket, then grant the dedicated engine user audio access (Linux)
     #[command(hide = true)]
     AclWait {
         user: String,
@@ -83,9 +77,7 @@ enum SystemAction {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    // Re-exec disclaimed (macOS) before anything else so TCC attributes the
-    // Input Monitoring grant to aural itself, not the launching terminal —
-    // only for commands that install the keyboard hook.
+    // Re-exec disclaimed (macOS) before anything else so TCC attributes the Input Monitoring grant to aural itself, not the launching terminal — only for commands that install the keyboard hook.
     #[cfg(target_os = "macos")]
     if disclaim_needed(cli.command.as_ref()) {
         aural::macos::disclaim()?;
@@ -160,28 +152,22 @@ fn main() -> Result<()> {
     }
 }
 
-/// Bare `aural`: the help text — except inside the packaged Aural.app, where
-/// a no-argument launch is how Finder/`open` starts the app (the tray).
+/// Bare `aural`: the help text — except inside the packaged Aural.app, where a no-argument launch is how Finder/`open` starts the app (the tray).
 fn run_default() -> Result<()> {
     #[cfg(target_os = "macos")]
     if aural::system::in_app_bundle() {
         return aural::menubar::run();
     }
-    // render_long_help so this matches `aural --help` exactly (print_help
-    // renders the short form).
+    // render_long_help so this matches `aural --help` exactly (print_help renders the short form).
     print!("{}", Cli::command().render_long_help());
     Ok(())
 }
 
-/// Whether the command installs the keyboard hook (needs Input Monitoring) or
-/// reports on it, so it is worth re-exec'ing disclaimed. Bare `aural` is the
-/// help text (or, inside the app bundle, the tray — guarded below), and the
-/// control commands (`mute`/`volume`/`about`/…) never touch the hook.
+/// Whether the command installs the keyboard hook (needs Input Monitoring) or reports on it, so it is worth re-exec'ing disclaimed.
+/// Bare `aural` is the help text (or, inside the app bundle, the tray — guarded below), and the control commands (`mute`/`volume`/`about`/…) never touch the hook.
 ///
-/// When launched from within a `.app` bundle, the responsible process is
-/// already "Aural" (a stable, grantable identity), so disclaiming would only
-/// create a *new* TCC identity (the raw binary path) that the user hasn't
-/// granted. Skip the re-exec in that case.
+/// When launched from within a `.app` bundle, the responsible process is already "Aural" (a stable, grantable identity), so disclaiming would only create a *new* TCC identity (the raw binary path) that the user hasn't granted.
+/// Skip the re-exec in that case.
 #[cfg(target_os = "macos")]
 fn disclaim_needed(cmd: Option<&Command>) -> bool {
     if aural::system::in_app_bundle() {

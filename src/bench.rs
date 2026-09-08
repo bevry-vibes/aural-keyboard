@@ -1,6 +1,5 @@
-//! `bench`: measures trigger→voice-start latency (p50/p95/p99) — the part of the
-//! pipeline this program controls. OS hook dispatch happens before our callback
-//! and is not included (documented in DESIGN.md §5).
+//! `bench`: measures trigger→voice-start latency (p50/p95/p99) — the part of the pipeline this program controls.
+//! OS hook dispatch happens before our callback and is not included (documented in DESIGN.md §5).
 
 use anyhow::Result;
 use std::time::{Duration, Instant};

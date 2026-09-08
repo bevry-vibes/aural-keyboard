@@ -1,9 +1,7 @@
-//! cpal output stage: the shortest path from the OS audio callback to `AuralMixer`
-//! (DESIGN.md D2 refinement — cpal directly, no intermediate mixer thread/channel).
+//! cpal output stage: the shortest path from the OS audio callback to `AuralMixer` (DESIGN.md D2 refinement — cpal directly, no intermediate mixer thread/channel).
 //!
-//! Buffer negotiation: try 128 then 256 fixed frames (WASAPI shared mode accepts
-//! small periods), falling back to the device default. The negotiated value is
-//! reported for `doctor`/`bench`.
+//! Buffer negotiation: try 128 then 256 fixed frames (WASAPI shared mode accepts small periods), falling back to the device default.
+//! The negotiated value is reported for `doctor`/`bench`.
 
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -45,8 +43,7 @@ pub fn start_stream(
     let sample_rate = sample_rate_of(supported);
     let mut last_err = None;
     for candidate in [Some(128u32), Some(256), None] {
-        // Use the device's default config untouched (channel count included —
-        // forcing stereo breaks multi-channel WASAPI endpoints).
+        // Use the device's default config untouched (channel count included — forcing stereo breaks multi-channel WASAPI endpoints).
         let mut config: StreamConfig = supported.config();
         config.buffer_size = match candidate {
             Some(n) => BufferSize::Fixed(n),
@@ -77,8 +74,7 @@ pub fn start_stream(
 
 // cpal moves the mixer into the callback; we only need a fresh closure per attempt.
 fn try_build(device: &cpal::Device, config: &StreamConfig, mixer: &AuralMixer) -> Result<Stream> {
-    // Reconstructing is cheap and keeps `start_stream` retry-friendly: the mixer
-    // state is empty at startup anyway (voices are all Free).
+    // Reconstructing is cheap and keeps `start_stream` retry-friendly: the mixer state is empty at startup anyway (voices are all Free).
     let mut mixer = mixer.clone_fresh();
     let stream = device.build_output_stream(
         *config,

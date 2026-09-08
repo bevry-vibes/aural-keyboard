@@ -28,10 +28,7 @@ impl Default for Config {
 }
 
 /// State dir holding `config.json`, the PID/lock files, and the log.
-/// Overridable via `AURAL_CONFIG_DIR` — dedicated-user mode points both the
-/// systemd daemon (running as the `aural` user) and your own CLI at the same
-/// group-writable dir, so mute/volume/status work across the uid boundary
-/// (see `scripts/setup-dedicated-user.sh`).
+/// Overridable via `AURAL_CONFIG_DIR` — dedicated-user mode points both the systemd daemon (running as the `aural` user) and your own CLI at the same group-writable dir, so mute/volume/status work across the uid boundary (see `scripts/setup-dedicated-user.sh`).
 pub fn dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("AURAL_CONFIG_DIR") {
         if !dir.is_empty() {
@@ -79,8 +76,7 @@ pub fn mtime() -> Option<std::time::SystemTime> {
     std::fs::metadata(path()).and_then(|m| m.modified()).ok()
 }
 
-/// Parse "Ctrl+Shift+F12" into (modifiers, vk) as used by RegisterHotKey.
-/// Returns None for an empty/unparseable spec.
+/// Parse "Ctrl+Shift+F12" into (modifiers, vk) as used by RegisterHotKey. Returns None for an empty/unparseable spec.
 pub fn parse_hotkey(spec: &str) -> Option<(u32, u32)> {
     let mut mods = 0u32;
     let mut key: Option<u32> = None;

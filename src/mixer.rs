@@ -1,9 +1,8 @@
 //! The real-time voice-pool mixer (DESIGN.md §5; decision D6, §7).
 //!
 //! Lives entirely inside the audio callback: no allocation, no locks, no I/O.
-//! Triggers arrive over a crossbeam channel from the keyboard-hook thread and are
-//! drained lazily at frame boundaries. Voices: velocity gain + 0.5 s release ramp,
-//! replicating aural-coding's Web Audio semantics (`noteOn`/`noteOff`).
+//! Triggers arrive over a crossbeam channel from the keyboard-hook thread and are drained lazily at frame boundaries.
+//! Voices: velocity gain + 0.5 s release ramp, replicating aural-coding's Web Audio semantics (`noteOn`/`noteOff`).
 
 use crate::assets::SampleBank;
 use crate::mapping::Instrument;
@@ -115,8 +114,7 @@ impl AuralMixer {
         }
     }
 
-    /// A fresh mixer over the same inputs (all voices Free). Used when (re)building
-    /// the output stream — e.g. buffer-size retry or device-loss recovery.
+    /// A fresh mixer over the same inputs (all voices Free). Used when (re)building the output stream — e.g. buffer-size retry or device-loss recovery.
     pub fn clone_fresh(&self) -> Self {
         AuralMixer::new(
             self.rx.clone(),
@@ -130,8 +128,7 @@ impl AuralMixer {
 }
 
 impl AuralMixer {
-    /// cpal output callback body: fill one interleaved multi-channel buffer.
-    /// The mix goes to channels 0/1; any extra device channels stay silent.
+    /// cpal output callback body: fill one interleaved multi-channel buffer. The mix goes to channels 0/1; any extra device channels stay silent.
     pub fn fill(&mut self, out: &mut [f32]) {
         out.fill(0.0);
         let muted = self.flags.muted.load(Ordering::Relaxed);
@@ -219,8 +216,7 @@ impl AuralMixer {
                 self.clock += 1;
             }
             Trigger::NoteOff { key } => {
-                // Release detaches the voice from the key; the tail keeps ringing,
-                // so an immediate re-press starts a fresh voice (original behavior).
+                // Release detaches the voice from the key; the tail keeps ringing, so an immediate re-press starts a fresh voice (original behavior).
                 for v in &mut self.voices {
                     if v.key == key && v.state == VoiceState::Playing {
                         v.state = VoiceState::Releasing;
@@ -296,8 +292,7 @@ mod tests {
 
     #[test]
     fn release_fades_over_half_second() {
-        // Synthetic samples are 2 s long, so the voice outlives the release ramp:
-        // output must go silent ≈ 0.5 s (24000 frames) after NoteOff.
+        // Synthetic samples are 2 s long, so the voice outlives the release ramp: output must go silent ≈ 0.5 s (24000 frames) after NoteOff.
         let (tx, mut mixer) = setup();
         press(&tx, mapping::VK_A);
         tx.send(Trigger::NoteOff { key: mapping::VK_A }).unwrap();

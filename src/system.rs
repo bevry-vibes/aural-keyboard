@@ -1,19 +1,13 @@
-//! system — `aural system …`: the installed-app lifecycle. The daemon module
-//! owns the *process* lifecycle (spawn/stop/status, PID file); this one owns
-//! the *app*: the menu-bar/tray entry, starting at login, and — on macOS —
-//! the Aural.app bundle that gives the app a stable, grantable identity.
+//! system — `aural system …`: the installed-app lifecycle.
+//! The daemon module owns the *process* lifecycle (spawn/stop/status, PID file); this one owns the *app*: the menu-bar/tray entry, starting at login, and — on macOS — the Aural.app bundle that gives the app a stable, grantable identity.
 //!
 //! What "installed" means per platform:
 //!
-//! - **macOS** — `~/Applications/Aural.app`: a copy of this binary, bundled
-//!   (`LSUIElement`, so no Dock icon) and code-signed. The menu-bar app only
-//!   runs from a bundle, and macOS's Input Monitoring grant keys to the
-//!   bundle's "Aural" identity — a stable signature keeps the grant valid
-//!   across reinstalls (DESIGN.md §12). A LaunchAgent starts it at login.
-//! - **Linux** — the tray app (`menubar`: engine + StatusNotifierItem icon),
-//!   started at login by an XDG autostart entry.
-//! - **Windows** — the background daemon, started at login by the registry
-//!   Run key (no tray yet).
+//! - **macOS** — `~/Applications/Aural.app`: a copy of this binary, bundled (`LSUIElement`, so no Dock icon) and code-signed.
+//!   The menu-bar app only runs from a bundle, and macOS's Input Monitoring grant keys to the bundle's "Aural" identity — a stable signature keeps the grant valid across reinstalls (DESIGN.md §12).
+//!   A LaunchAgent starts it at login.
+//! - **Linux** — the tray app (`menubar`: engine + StatusNotifierItem icon), started at login by an XDG autostart entry.
+//! - **Windows** — the background daemon, started at login by the registry Run key (no tray yet).
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use anyhow::bail;
@@ -25,12 +19,9 @@ pub mod linux;
 
 // --- install / uninstall ---
 
-/// `aural system install`: stop whatever is running, put the app in place —
-/// permissions included — then start it now and at every login.
+/// `aural system install`: stop whatever is running, put the app in place — permissions included — then start it now and at every login.
 pub fn install() -> Result<()> {
-    // Invoked from within the running app (its menu's Install item): the app
-    // obviously exists and is running, so stopping/starting ourselves would
-    // be self-destructive — the only thing left is the login registration.
+    // Invoked from within the running app (its menu's Install item): the app obviously exists and is running, so stopping/starting ourselves would be self-destructive — the only thing left is the login registration.
     if crate::daemon::status() == Some(std::process::id()) {
         return enable();
     }
@@ -38,8 +29,7 @@ pub fn install() -> Result<()> {
     return linux::install();
     #[cfg(target_os = "macos")]
     {
-        // The single-instance guard means the app we install must take over
-        // from any engine that is already running.
+        // The single-instance guard means the app we install must take over from any engine that is already running.
         if crate::daemon::status().is_some() {
             crate::daemon::stop()?;
         }
@@ -48,8 +38,7 @@ pub fn install() -> Result<()> {
             install_app_bundle()?.display()
         );
         enable_login()?;
-        // LaunchServices (`open`) attributes the TCC prompt to "Aural" and
-        // honors the bundle's LSUIElement (menu-bar agent, no Dock icon).
+        // LaunchServices (`open`) attributes the TCC prompt to "Aural" and honors the bundle's LSUIElement (menu-bar agent, no Dock icon).
         let app = app_bundle_path()?;
         let status = std::process::Command::new("open")
             .arg(&app)
@@ -78,12 +67,9 @@ pub fn install() -> Result<()> {
     }
 }
 
-/// `aural system uninstall`: remove the app — the login registration first,
-/// so nothing resurrects at the next login. Safe to invoke from the tray's
-/// own Uninstall item (macOS/Linux): files are removed before the stop, which
-/// kills this process (on macOS the bundle is removed while still executing
-/// from it — unlink only). Windows cannot delete a running exe, so it stops
-/// first (the tray doesn't run there).
+/// `aural system uninstall`: remove the app — the login registration first, so nothing resurrects at the next login.
+/// Safe to invoke from the tray's own Uninstall item (macOS/Linux): files are removed before the stop, which kills this process (on macOS the bundle is removed while still executing from it — unlink only).
+/// Windows cannot delete a running exe, so it stops first (the tray doesn't run there).
 pub fn uninstall() -> Result<()> {
     #[cfg(target_os = "linux")]
     if linux::dedicated_installed() {
@@ -91,10 +77,9 @@ pub fn uninstall() -> Result<()> {
     }
     #[cfg(target_os = "linux")]
     if !linux::dedicated_installed() {
-        // Fallback mode: the autostart entry and engine are user-level. The
-        // binary copy needs the elevated pass — remove it as root, hint at it
-        // otherwise (the input-group membership stays; other tools may share
-        // it). The stop stays last: the tray invokes this on itself.
+        // Fallback mode: the autostart entry and engine are user-level.
+        // The binary copy needs the elevated pass — remove it as root, hint at it otherwise (the input-group membership stays; other tools may share it).
+        // The stop stays last: the tray invokes this on itself.
         if disable_login()? {
             println!("aural: no longer starts at login");
         } else {
@@ -174,8 +159,7 @@ pub fn disable() -> Result<()> {
 
 // --- start at login (macOS LaunchAgent / Linux XDG autostart / Windows Run key) ---
 
-/// Register the app to start at login. Also used by the tray's "Enable at
-/// Login" checkbox.
+/// Register the app to start at login. Also used by the tray's "Enable at Login" checkbox.
 pub(crate) fn enable_login() -> Result<()> {
     #[cfg(target_os = "macos")]
     {
@@ -211,8 +195,7 @@ pub(crate) fn enable_login() -> Result<()> {
     }
     #[cfg(target_os = "linux")]
     {
-        // Prefer the stable copy the install made (/usr/local/bin); before
-        // installing (or from a manual binary) the current binary stands in.
+        // Prefer the stable copy the install made (/usr/local/bin); before installing (or from a manual binary) the current binary stands in.
         let exe = if std::path::Path::new(linux::INSTALL_BIN).exists() {
             linux::INSTALL_BIN.to_string()
         } else {
@@ -248,8 +231,7 @@ pub(crate) fn enable_login() -> Result<()> {
     Ok(())
 }
 
-/// Remove the start-at-login registration. Ok(false) when nothing was
-/// registered (uninstall stays idempotent).
+/// Remove the start-at-login registration. Ok(false) when nothing was registered (uninstall stays idempotent).
 pub(crate) fn disable_login() -> Result<bool> {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     let removed = {
@@ -278,8 +260,7 @@ pub(crate) fn disable_login() -> Result<bool> {
     Ok(removed)
 }
 
-/// Whether the app is registered to start at login (`aural system doctor`,
-/// the tray's "Enable at Login" checkbox state).
+/// Whether the app is registered to start at login (`aural system doctor`, the tray's "Enable at Login" checkbox state).
 pub fn login_enabled() -> bool {
     #[cfg(target_os = "linux")]
     let enabled = {
@@ -305,15 +286,12 @@ pub fn login_enabled() -> bool {
     enabled
 }
 
-/// Whether the app's install artifacts exist — the binary/tray sense of
-/// "properly installed" (drives the tray's Install/Uninstall enabled state;
-/// the login registration has its own checkbox).
+/// Whether the app's install artifacts exist — the binary/tray sense of "properly installed" (drives the tray's Install/Uninstall enabled state; the login registration has its own checkbox).
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub fn installed() -> bool {
     #[cfg(target_os = "macos")]
     {
-        // The macOS tray only runs from a bundle — ours, or one the user
-        // drag-installed from a release zip elsewhere.
+        // The macOS tray only runs from a bundle — ours, or one the user drag-installed from a release zip elsewhere.
         in_app_bundle() || app_bundle_path().map(|p| p.exists()).unwrap_or(false)
     }
     #[cfg(target_os = "linux")]
@@ -347,8 +325,7 @@ fn autostart_path() -> Result<PathBuf> {
     }
 }
 
-/// Minimal XML text escaping for the plist (`&` and `<` in a path would break
-/// parsing otherwise; paths with spaces need none).
+/// Minimal XML text escaping for the plist (`&` and `<` in a path would break parsing otherwise; paths with spaces need none).
 #[cfg(target_os = "macos")]
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -356,15 +333,13 @@ fn xml_escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
-/// Escape a path for a Desktop Entry `Exec` value (double-quoted per the
-/// spec); only `"` and `\` can appear in a path and need escaping.
+/// Escape a path for a Desktop Entry `Exec` value (double-quoted per the spec); only `"` and `\` can appear in a path and need escaping.
 #[cfg(target_os = "linux")]
 fn exec_quote(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// The XDG autostart entry contents — the tray app (hosting the engine).
-/// Shared by `enable_login` and the Linux install.
+/// The XDG autostart entry contents — the tray app (hosting the engine). Shared by `enable_login` and the Linux install.
 #[cfg(target_os = "linux")]
 pub(crate) fn desktop_entry(exe: &str) -> String {
     format!(
@@ -384,9 +359,7 @@ pub(crate) fn desktop_entry(exe: &str) -> String {
 
 // --- the app bundle (macOS) ---
 
-/// True when the running binary lives inside a `.app` bundle — the packaged
-/// Aural.app (`aural system install`'s, or one drag-installed from a release
-/// zip).
+/// True when the running binary lives inside a `.app` bundle — the packaged Aural.app (`aural system install`'s, or one drag-installed from a release zip).
 #[cfg(target_os = "macos")]
 pub fn in_app_bundle() -> bool {
     std::env::current_exe()
@@ -395,17 +368,14 @@ pub fn in_app_bundle() -> bool {
         .unwrap_or(false)
 }
 
-/// The install location: `~/Applications/Aural.app` — per-user, user-writable,
-/// and `open`/LaunchServices find it there.
+/// The install location: `~/Applications/Aural.app` — per-user, user-writable, and `open`/LaunchServices find it there.
 #[cfg(target_os = "macos")]
 fn app_bundle_path() -> Result<PathBuf> {
     let home = std::env::var("HOME").context("HOME is not set")?;
     Ok(PathBuf::from(home).join("Applications").join("Aural.app"))
 }
 
-/// What the LaunchAgent should launch: this bundle when we already run inside
-/// one (wherever the user mounted it — e.g. /Applications from a release
-/// zip), otherwise the installed `~/Applications/Aural.app`.
+/// What the LaunchAgent should launch: this bundle when we already run inside one (wherever the user mounted it — e.g. /Applications from a release zip), otherwise the installed `~/Applications/Aural.app`.
 #[cfg(target_os = "macos")]
 fn app_program() -> Result<PathBuf> {
     let exe = std::env::current_exe().context("current_exe")?;
@@ -419,10 +389,9 @@ fn app_program() -> Result<PathBuf> {
     Ok(installed)
 }
 
-/// Wrap this binary as `~/Applications/Aural.app`. The copy decouples the app
-/// from wherever cargo put the binary (so it survives rebuilds/clean), the
-/// stable bundle identity keeps the Input Monitoring grant, and the menu-bar
-/// app only runs bundled. Same layout `scripts/package-app.sh` produces.
+/// Wrap this binary as `~/Applications/Aural.app`.
+/// The copy decouples the app from wherever cargo put the binary (so it survives rebuilds/clean), the stable bundle identity keeps the Input Monitoring grant, and the menu-bar app only runs bundled.
+/// Same layout `scripts/package-app.sh` produces.
 #[cfg(target_os = "macos")]
 fn install_app_bundle() -> Result<PathBuf> {
     let app = app_bundle_path()?;
@@ -447,9 +416,8 @@ fn install_app_bundle() -> Result<PathBuf> {
     Ok(app)
 }
 
-/// The bundle's Info.plist — `LSUIElement` keeps it a menu-bar agent (no Dock
-/// icon). With no command-line arguments the bundled binary runs the
-/// menu-bar app, so both `open Aural.app` and the LaunchAgent start the app.
+/// The bundle's Info.plist — `LSUIElement` keeps it a menu-bar agent (no Dock icon).
+/// With no command-line arguments the bundled binary runs the menu-bar app, so both `open Aural.app` and the LaunchAgent start the app.
 #[cfg(target_os = "macos")]
 fn info_plist() -> String {
     format!(
@@ -478,10 +446,7 @@ fn info_plist() -> String {
     )
 }
 
-/// Code-sign the bundle: prefer the stable "Aural Code Signing" self-signed
-/// identity (keeps the TCC grant valid across reinstalls — DESIGN.md §12),
-/// then `AURAL_SIGN_IDENTITY`, else ad-hoc (`-`; free, but the grant must be
-/// re-made after every reinstall).
+/// Code-sign the bundle: prefer the stable "Aural Code Signing" self-signed identity (keeps the TCC grant valid across reinstalls — DESIGN.md §12), then `AURAL_SIGN_IDENTITY`, else ad-hoc (`-`; free, but the grant must be re-made after every reinstall).
 #[cfg(target_os = "macos")]
 fn codesign(app: &std::path::Path) -> Result<()> {
     let identity = std::env::var("AURAL_SIGN_IDENTITY")
@@ -505,8 +470,7 @@ fn codesign(app: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// Is the "Aural Code Signing" identity present in the keychain? (Mirrors
-/// `scripts/package-app.sh`.)
+/// Is the "Aural Code Signing" identity present in the keychain? (Mirrors `scripts/package-app.sh`.)
 #[cfg(target_os = "macos")]
 fn find_aural_signing_identity() -> Option<String> {
     let out = std::process::Command::new("security")
@@ -521,9 +485,7 @@ fn find_aural_signing_identity() -> Option<String> {
 
 // --- the installed app (Windows): a stable exe copy ---
 
-/// The install location: `%LOCALAPPDATA%\Programs\aural\aural.exe` — decoupled
-/// from wherever cargo put the binary, so the login entry survives
-/// `cargo clean` and rebuilds.
+/// The install location: `%LOCALAPPDATA%\Programs\aural\aural.exe` — decoupled from wherever cargo put the binary, so the login entry survives `cargo clean` and rebuilds.
 #[cfg(windows)]
 fn installed_exe() -> Result<PathBuf> {
     let local = std::env::var("LOCALAPPDATA").context("LOCALAPPDATA is not set")?;
@@ -533,8 +495,7 @@ fn installed_exe() -> Result<PathBuf> {
         .join("aural.exe"))
 }
 
-/// Copy this binary to the install location (unlink first — replacing a
-/// running exe fails on Windows; running from the copy itself is a no-op).
+/// Copy this binary to the install location (unlink first — replacing a running exe fails on Windows; running from the copy itself is a no-op).
 #[cfg(windows)]
 fn install_exe_copy() -> Result<PathBuf> {
     let dest = installed_exe()?;
