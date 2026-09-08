@@ -142,7 +142,7 @@ pub fn stop() -> Result<()> {
         TerminateProcess(h, 0).context("terminating daemon")?;
         // Wait for the exit so an immediate restart (`aural system install`)
         // doesn't race the single-instance mutex.
-        WaitForSingleObject(h, 3000);
+        let _ = WaitForSingleObject(h, 3000);
         let _ = CloseHandle(h);
     }
     let _ = std::fs::remove_file(crate::config::pid_path());

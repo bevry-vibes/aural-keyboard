@@ -118,10 +118,10 @@ fn id_of(name: &str, flag: &str) -> Result<u32> {
     if !out.status.success() {
         bail!("id {flag} {name} failed");
     }
-    Ok(String::from_utf8_lossy(&out.stdout)
+    String::from_utf8_lossy(&out.stdout)
         .trim()
         .parse()
-        .context("parsing id output")?)
+        .context("parsing id output")
 }
 
 fn user_exists(name: &str) -> bool {
@@ -174,10 +174,7 @@ fn write_user(user: &str, rel: &str, contents: &str) -> Result<()> {
 fn install_binary() -> Result<()> {
     let src = std::fs::canonicalize(std::env::current_exe().context("current_exe")?)
         .context("resolving current_exe")?;
-    let same = match std::fs::canonicalize(INSTALL_BIN) {
-        Ok(dest) => dest == src,
-        Err(_) => false,
-    };
+    let same = std::fs::canonicalize(INSTALL_BIN).is_ok_and(|dest| dest == src);
     if same {
         return Ok(());
     }
@@ -395,10 +392,7 @@ pub fn uninstall() -> Result<()> {
         sudo_reexec(&["uninstall"]);
     }
     // Direct root (no sudo context) skips the user-session files.
-    let (user, uid) = match sudo_user() {
-        Ok(pair) => pair,
-        Err(_) => (String::new(), 0),
-    };
+    let (user, uid) = sudo_user().unwrap_or_default();
     println!("aural: stopping and disabling aural.service");
     let _ = run_ok("systemctl", &["disable", "--now", "aural.service"]);
     if !user.is_empty() {

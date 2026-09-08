@@ -15,7 +15,9 @@
 //! - **Windows** — the background daemon, started at login by the registry
 //!   Run key (no tray yet).
 
-use anyhow::{bail, Context, Result};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use anyhow::bail;
+use anyhow::{Context, Result};
 use std::path::PathBuf;
 
 #[cfg(target_os = "linux")]
@@ -129,6 +131,7 @@ pub fn uninstall() -> Result<()> {
     }
     #[cfg(windows)]
     {
+        // Windows cannot delete a running exe, so stop before removing.
         crate::daemon::stop()?;
         if let Ok(exe) = installed_exe() {
             if let Some(dir) = exe.parent().filter(|d| d.exists()) {
@@ -137,11 +140,13 @@ pub fn uninstall() -> Result<()> {
                 println!("aural: removed {}", dir.display());
             }
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(windows))]
-    crate::daemon::stop()?;
-    Ok(())
+    {
+        crate::daemon::stop()?;
+        Ok(())
+    }
 }
 
 /// `aural system enable`: start the app automatically at login.
@@ -288,7 +293,9 @@ pub fn login_enabled() -> bool {
     let enabled = autostart_path().map(|p| p.exists()).unwrap_or_default();
     #[cfg(windows)]
     let enabled = unsafe {
-        let Ok(key) = open_run_key() else { false };
+        let Ok(key) = open_run_key() else {
+            return false;
+        };
         let r = RegQueryValueExW(key, w!("AuralKeyboard"), None, None, None, None);
         let _ = RegCloseKey(key);
         r.is_ok()
@@ -532,10 +539,7 @@ fn installed_exe() -> Result<PathBuf> {
 fn install_exe_copy() -> Result<PathBuf> {
     let dest = installed_exe()?;
     let exe = std::env::current_exe().context("current_exe")?;
-    let same = match std::fs::canonicalize(&dest) {
-        Ok(d) => d == exe,
-        Err(_) => false,
-    };
+    let same = std::fs::canonicalize(&dest).is_ok_and(|d| d == exe);
     if !same {
         if let Some(dir) = dest.parent() {
             std::fs::create_dir_all(dir)?;
