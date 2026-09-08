@@ -1,7 +1,8 @@
-# meta.md — local amendments to bevry-vibes/skills
+# commits.md — local amendments to bevry-vibes/skills
 
-Project-local amendments to the skills referenced in [AGENTS.md](AGENTS.md).
-The remote skills are authoritative where these do not conflict.
+Project-local amendments to [commits.md](https://github.com/bevry-vibes/skills/blob/main/commits.md)
+(the only skill this file amends). The remote skill is authoritative where these
+do not conflict.
 
 ## amendments to commits.md — release flow
 
