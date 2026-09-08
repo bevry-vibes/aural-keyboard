@@ -1,7 +1,6 @@
 //! The aural-coding musical mapping, ported verbatim (DESIGN.md §3).
 //!
-//! Pure functions over virtual-key codes — no platform dependencies, fully unit-tested.
-//! `vk` values are Windows VK codes, which v1 uses as the cross-platform key identity.
+//! Pure functions over virtual-key codes — no platform dependencies, fully unit-tested. `vk` values are Windows VK codes, which v1 uses as the cross-platform key identity.
 
 /// Which sample bank a note plays from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,11 +21,9 @@ pub struct MappedNote {
 pub const FIRST_KEY: u8 = 0x15; // MIDI 21 (A0)
 pub const LAST_KEY: u8 = 0x6C; // MIDI 108 (C8)
 
-/// `majorScaleNotes` from aural-coding: MIDI 21..=108 filtered by
-/// `((index + 4) % 12) in {0,2,4,5,7,9,11}`.
+/// `majorScaleNotes` from aural-coding: MIDI 21..=108 filtered by `((index + 4) % 12) in {0,2,4,5,7,9,11}`.
 ///
-/// The original author commented "C Major Scale. (I think?)" — by pitch class the filter
-/// actually yields C Mixolydian (C D E F G A Bb). The formula is the spec; ported verbatim.
+/// The original author commented "C Major Scale. (I think?)" — by pitch class the filter actually yields C Mixolydian (C D E F G A Bb). The formula is the spec; ported verbatim.
 pub const MAJOR_SCALE_NOTES: [u8; 52] = {
     let mut out = [0u8; 52];
     let mut n = 0usize;
@@ -149,10 +146,8 @@ pub fn is_modifier(vk: u8) -> bool {
     )
 }
 
-/// The effective shift for a key press: caps lock swaps the letter registers so the
-/// sound reflects the capital actually written — with caps on, plain letters take the
-/// shifted (higher) register and shift+letters the plain one. Only letters are
-/// affected (caps lock never changes what digits/symbols produce).
+/// The effective shift for a key press: caps lock swaps the letter registers so the sound reflects the capital actually written — with caps on, plain letters take the shifted (higher) register and shift+letters the plain one.
+/// Only letters are affected (caps lock never changes what digits/symbols produce).
 pub fn effective_shift(vk: u8, shift: bool, caps_lock: bool) -> bool {
     shift ^ (caps_lock && (VK_A..=VK_Z).contains(&vk))
 }
@@ -167,9 +162,8 @@ fn drum(midi: u8, velocity: f32) -> Option<MappedNote> {
 
 /// The verbatim `bufferForEvent` port.
 ///
-/// Letters always play piano at velocity 1.0: `index = 24 + (code - 'A') % 12`,
-/// `+12` when shifted (uppercase in the original). Everything else plays drums;
-/// the drum MIDI numbers are the original's General-MIDI-percussion choices.
+/// Letters always play piano at velocity 1.0: `index = 24 + (code - 'A') % 12`, `+12` when shifted (uppercase in the original).
+/// Everything else plays drums; the drum MIDI numbers are the original's General-MIDI-percussion choices.
 pub fn map_key(vk: u8, shift: bool) -> Option<MappedNote> {
     if is_modifier(vk) {
         return None;

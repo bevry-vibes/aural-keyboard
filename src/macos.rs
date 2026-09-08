@@ -1,14 +1,8 @@
-//! macOS-only process self-disclaim for TCC attribution, plus the
-//! Secure Event Input probe used by `aural system doctor`.
+//! macOS-only process self-disclaim for TCC attribution, plus the Secure Event Input probe used by `aural system doctor`.
 //!
-//! macOS grants Input Monitoring to the *responsible process* — normally the
-//! app that launched us (DESIGN.md §11), so a terminal-launched
-//! run is attributed to the terminal. Terminal.app/iTerm2 break that
-//! inheritance with the private `responsibility_spawnattrs_setdisclaim`
-//! posix_spawn attribute, making the spawned process its own responsible app.
-//! We do the same by re-exec'ing ourselves: the re-exec'd process is its own
-//! responsible process, so the TCC prompt and grant key to aural itself
-//! (DESIGN.md §11).
+//! macOS grants Input Monitoring to the *responsible process* — normally the app that launched us (DESIGN.md §11), so a terminal-launched run is attributed to the terminal.
+//! Terminal.app/iTerm2 break that inheritance with the private `responsibility_spawnattrs_setdisclaim` posix_spawn attribute, making the spawned process its own responsible app.
+//! We do the same by re-exec'ing ourselves: the re-exec'd process is its own responsible process, so the TCC prompt and grant key to aural itself (DESIGN.md §11).
 
 use anyhow::Result;
 use std::ffi::CString;
@@ -20,23 +14,16 @@ const DISCLAIM_ENV: &str = "AURAL_DISCLAIMED";
 
 /// PID of the disclaimed child, for the parent's signal-forwarding handler.
 static CHILD_PID: AtomicI32 = AtomicI32::new(0);
-/// The Apple `spawn_private.h` signature: `int
-/// responsibility_spawnattrs_setdisclaim(posix_spawnattr_t *attrs, int
-/// disclaim)`. The `disclaim` argument is load-bearing — a one-arg call leaves
-/// it as caller garbage, which can silently skip the flag.
+/// The Apple `spawn_private.h` signature: `int responsibility_spawnattrs_setdisclaim(posix_spawnattr_t *attrs, int disclaim)`.
+/// The `disclaim` argument is load-bearing — a one-arg call leaves it as caller garbage, which can silently skip the flag.
 type SetDisclaim = unsafe extern "C" fn(*mut libc::posix_spawnattr_t, libc::c_int) -> libc::c_int;
 
-/// Re-exec `self` disclaimed so TCC treats this process as its own app. Called
-/// from `main` before any side effects, only for commands that install the
-/// keyboard hook (`run`, live `bench`) or report on it (`doctor`).
+/// Re-exec `self` disclaimed so TCC treats this process as its own app.
+/// Called from `main` before any side effects, only for commands that install the keyboard hook (`run`, live `bench`) or report on it (`doctor`).
 ///
-/// Uses the proven child-spawn pattern (Terminal.app/iTerm2/selfauth/disclaim
-/// all spawn without `POSIX_SPAWN_SETEXEC`, since the disclaim flag is applied
-/// in the spawn child — `SETEXEC` bypasses it). The parent forwards
-/// SIGINT/SIGTERM/SIGHUP to the child and exits with its status, so a
-/// foreground run keeps normal Ctrl+C and exit-code behavior. The
-/// child inherits stdin/stdout/stderr (no file actions), which keeps
-/// `--stdin`, live `bench` typing, and foreground Ctrl+C working.
+/// Uses the proven child-spawn pattern (Terminal.app/iTerm2/selfauth/disclaim all spawn without `POSIX_SPAWN_SETEXEC`, since the disclaim flag is applied in the spawn child — `SETEXEC` bypasses it).
+/// The parent forwards SIGINT/SIGTERM/SIGHUP to the child and exits with its status, so a foreground run keeps normal Ctrl+C and exit-code behavior.
+/// The child inherits stdin/stdout/stderr (no file actions), which keeps `--stdin`, live `bench` typing, and foreground Ctrl+C working.
 pub fn disclaim() -> Result<()> {
     if std::env::var_os(DISCLAIM_ENV).is_some() {
         return Ok(()); // already disclaimed (the re-exec'd child): run normally
@@ -63,8 +50,7 @@ pub fn disclaim() -> Result<()> {
     std::process::exit(wait_for(child));
 }
 
-/// dlsym `responsibility_spawnattrs_setdisclaim` from libSystem (absent from
-/// the SDK headers, so no static link).
+/// dlsym `responsibility_spawnattrs_setdisclaim` from libSystem (absent from the SDK headers, so no static link).
 fn disclaim_sym() -> Option<SetDisclaim> {
     let path = b"/usr/lib/libSystem.B.dylib\0";
     unsafe {
@@ -142,9 +128,7 @@ fn forward_signals() {
     }
 }
 
-/// Async-signal-safe: relay the signal to the disclaimed child (the child is
-/// in the same process group, so the terminal's Ctrl+C reaches it directly
-/// too; this just makes explicit forwards idempotent-safe).
+/// Async-signal-safe: relay the signal to the disclaimed child (the child is in the same process group, so the terminal's Ctrl+C reaches it directly too; this just makes explicit forwards idempotent-safe).
 unsafe extern "C" fn forward_signal(sig: libc::c_int) {
     let pid = CHILD_PID.load(Ordering::Relaxed);
     if pid > 0 {
@@ -175,15 +159,9 @@ fn wait_for(child: u32) -> i32 {
 
 // --- stale TCC entry cleanup (before prompting) ---
 
-/// Before prompting for Input Monitoring, clear this identity's stale TCC
-/// rows so the System Settings list stays clean: every re-sign of the bundle
-/// can leave the prior row behind, and each unanswered request parks one —
-/// all worthless, since we just found we don't have access. `tccutil reset`
-/// only works for bundle identifiers, so this applies inside Aural.app
-/// ("com.bevry.aural"); a naked binary's identifier ("aural") is refused by
-/// tccutil (verified on macOS 26) and is skipped silently — macOS offers no
-/// third-party API to clear another identity's rows. Best-effort either way:
-/// a failure just leaves the old rows and never blocks the prompt path.
+/// Before prompting for Input Monitoring, clear this identity's stale TCC rows so the System Settings list stays clean: every re-sign of the bundle can leave the prior row behind, and each unanswered request parks one — all worthless, since we just found we don't have access.
+/// `tccutil reset` only works for bundle identifiers, so this applies inside Aural.app ("com.bevry.aural"); a naked binary's identifier ("aural") is refused by tccutil (verified on macOS 26) and is skipped silently — macOS offers no third-party API to clear another identity's rows.
+/// Best-effort either way: a failure just leaves the old rows and never blocks the prompt path.
 pub fn reset_stale_tcc_entries() {
     let Some(identifier) = code_signing_identifier() else {
         return;
@@ -203,8 +181,7 @@ pub fn reset_stale_tcc_entries() {
     }
 }
 
-/// The running binary's code-signing identifier from `codesign -dv` (printed
-/// on stderr): names its TCC rows.
+/// The running binary's code-signing identifier from `codesign -dv` (printed on stderr): names its TCC rows.
 fn code_signing_identifier() -> Option<String> {
     let exe = std::env::current_exe().ok()?;
     let out = std::process::Command::new("codesign")
@@ -222,10 +199,8 @@ fn code_signing_identifier() -> Option<String> {
 
 // --- Secure Event Input (aural system doctor) ---
 
-/// True while any app holds "Secure Event Input": macOS withholds keyDown/keyUp
-/// from ALL event taps system-wide (only flagsChanged leaks) until it is
-/// released (DESIGN.md §12). Loaded from HIToolbox — the Carbon subframework
-/// path; the old ApplicationServices path is gone on macOS 26.
+/// True while any app holds "Secure Event Input": macOS withholds keyDown/keyUp from ALL event taps system-wide (only flagsChanged leaks) until it is released (DESIGN.md §12).
+/// Loaded from HIToolbox — the Carbon subframework path; the old ApplicationServices path is gone on macOS 26.
 pub fn secure_input_enabled() -> bool {
     type SeiFn = unsafe extern "C" fn() -> bool;
     let path =
@@ -244,8 +219,7 @@ pub fn secure_input_enabled() -> bool {
     }
 }
 
-/// `aural system doctor` line: `secure input: not active` normally; when active,
-/// names the holding app via IORegistry's `kCGSSessionSecureInputPID`.
+/// `aural system doctor` line: `secure input: not active` normally; when active, names the holding app via IORegistry's `kCGSSessionSecureInputPID`.
 pub fn secure_input_check() -> String {
     if !secure_input_enabled() {
         return "secure input: not active".to_string();
@@ -271,8 +245,7 @@ pub fn secure_input_check() -> String {
     }
 }
 
-/// PID holding secure input from `ioreg -n Root -d1 -a` (works for both the
-/// human and XML-plist output; no sudo needed).
+/// PID holding secure input from `ioreg -n Root -d1 -a` (works for both the human and XML-plist output; no sudo needed).
 fn secure_input_holder_pid() -> Option<u32> {
     let out = std::process::Command::new("ioreg")
         .args(["-n", "Root", "-d1", "-a"])

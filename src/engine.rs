@@ -1,5 +1,4 @@
-//! The engine: wires config → assets → mixer → cpal stream → keyboard hook,
-//! then supervises (config hot-reload, device-stall watchdog, graceful stop).
+//! The engine: wires config → assets → mixer → cpal stream → keyboard hook, then supervises (config hot-reload, device-stall watchdog, graceful stop).
 
 use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, Sender};
@@ -71,12 +70,9 @@ impl Engine {
     }
 }
 
-/// Engine supervision: stream, hook, config watch, stall watchdog. Runs the
-/// engine in every mode — foreground `aural`, the background daemon, and the
-/// tray-hosted app — writing the PID file so `status`/`stop`/`aural system`
-/// cover whichever instance is running.
-// device/supported are only read again on watchdog rebuilds, which the
-// flow-insensitive lint can't see.
+/// Engine supervision: stream, hook, config watch, stall watchdog.
+/// Runs the engine in every mode — foreground `aural`, the background daemon, and the tray-hosted app — writing the PID file so `status`/`stop`/`aural system` cover whichever instance is running.
+// device/supported are only read again on watchdog rebuilds, which the flow-insensitive lint can't see.
 #[allow(unused_assignments)]
 pub fn run(daemon: bool, stdin_keys: bool, bench_tx: Option<Sender<u64>>) -> Result<()> {
     if daemon {
@@ -95,9 +91,7 @@ pub fn run(daemon: bool, stdin_keys: bool, bench_tx: Option<Sender<u64>>) -> Res
         Some(s)
     };
     let config = config::load();
-    // Record the pid before installing the hook: the macOS grant wait can
-    // block there for minutes, and a blocked instance must stay visible to
-    // `aural status`/`stop`.
+    // Record the pid before installing the hook: the macOS grant wait can block there for minutes, and a blocked instance must stay visible to `aural status`/`stop`.
     std::fs::write(config::pid_path(), std::process::id().to_string()).ok();
     let mut hook = None;
     if stdin_keys {
@@ -137,8 +131,7 @@ pub fn run(daemon: bool, stdin_keys: bool, bench_tx: Option<Sender<u64>>) -> Res
                 .store(c.volume.to_bits(), Ordering::Relaxed);
         }
 
-        // Watchdog: render counter stalled ~2 s (device unplug/switch) → rebuild
-        // the stream on the current default device (KeyEcho lesson, DESIGN.md D2).
+        // Watchdog: render counter stalled ~2 s (device unplug/switch) → rebuild the stream on the current default device (KeyEcho lesson, DESIGN.md D2).
         let frames = engine.flags.frames_rendered.load(Ordering::Relaxed);
         stalled_checks = if frames == last_frames {
             stalled_checks + 1

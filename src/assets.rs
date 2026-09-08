@@ -1,6 +1,5 @@
-//! Embedded soundfont loading: OGG decode (symphonia) → mono downmix → silence trim
-//! → resample to the device rate (rubato). Runs once at startup; the render path
-//! only ever reads the leaked `&'static SampleBank`, so it never allocates.
+//! Embedded soundfont loading: OGG decode (symphonia) → mono downmix → silence trim → resample to the device rate (rubato).
+//! Runs once at startup; the render path only ever reads the leaked `&'static SampleBank`, so it never allocates.
 
 use anyhow::Result;
 
@@ -166,8 +165,7 @@ fn decode_ogg(bytes: &'static [u8]) -> Result<(Vec<f32>, u32)> {
     Ok((mono, rate))
 }
 
-/// Trim codec/encoder silence. Head trim is tight (attack latency matters);
-/// tail padding is generous (keep the natural decay).
+/// Trim codec/encoder silence. Head trim is tight (attack latency matters); tail padding is generous (keep the natural decay).
 fn trim_silence(mut data: Vec<f32>) -> Vec<f32> {
     const THRESHOLD: f32 = 1e-4;
     const HEAD_PAD: usize = 64;
@@ -187,9 +185,8 @@ fn trim_silence(mut data: Vec<f32>) -> Vec<f32> {
     data
 }
 
-/// One-shot startup resampler: Catmull-Rom cubic interpolation. We resample 37
-/// short samples exactly once at load, so a tiny interpolator beats pulling in
-/// an FFT/sinc library (rubato) — and is transparent for 44.1→48 kHz material.
+/// One-shot startup resampler: Catmull-Rom cubic interpolation.
+/// We resample 37 short samples exactly once at load, so a tiny interpolator beats pulling in an FFT/sinc library (rubato) — and is transparent for 44.1→48 kHz material.
 fn resample_to(data: Vec<f32>, from: u32, to: u32) -> Result<Vec<f32>> {
     if from == to || data.is_empty() {
         return Ok(data);
