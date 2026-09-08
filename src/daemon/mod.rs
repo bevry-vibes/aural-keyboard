@@ -1,7 +1,7 @@
-//! Daemon lifecycle: detached background process, PID file, single-instance,
-//! login autostart. Platform backends: `windows` (CreateProcessW detach, mutex,
-//! Registry Run key) and `unix` (setsid detach, flock; LaunchAgent on macOS,
-//! XDG autostart on Linux).
+//! Daemon lifecycle: detached background process, PID file, single-instance
+//! guard. Platform backends: `windows` (CreateProcessW detach, named mutex)
+//! and `unix` (setsid detach, flock). Login autostart lives in `system`
+//! (registry Run key / LaunchAgent / XDG autostart).
 
 #[cfg(windows)]
 mod windows;

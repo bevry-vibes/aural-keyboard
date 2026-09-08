@@ -82,7 +82,7 @@ pub const VK_OEM_PERIOD: u8 = 0xBE; // ./>
 
 /// Modifier keys are silent in the original (`key = null if key in ['meta','shift','control','alt']`).
 /// Map a text character to `(vk, shift)` for the stdin-driven test path
-/// (`aural run --stdin`). Letters/digits map to their US key; shifted
+/// (`aural stdin`). Letters/digits map to their US key; shifted
 /// punctuation returns `shift = true` so the caller can chord it (which also
 /// exercises the higher-register sounds, e.g. `!` → crash).
 pub fn vk_for_char(c: char) -> Option<(u8, bool)> {

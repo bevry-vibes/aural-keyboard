@@ -1,30 +1,27 @@
 //! Daemon lifecycle (Windows): detached background process, PID file,
-//! single-instance mutex, autostart via the Registry Run key.
+//! single-instance mutex. Login autostart lives in `system` (registry Run key).
 
 use anyhow::{Context, Result};
 use windows::core::w;
 use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE};
-use windows::Win32::System::Registry::{
-    RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
-    KEY_SET_VALUE, REG_SZ,
-};
 use windows::Win32::System::Threading::{
-    CreateMutexW, OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROCESS_TERMINATE,
+    CreateMutexW, OpenProcess, TerminateProcess, WaitForSingleObject,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
 };
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const DETACHED_PROCESS: u32 = 0x0000_0008;
 
-/// Held for the process lifetime; a second `run`/`start` fails fast.
-pub fn acquire_single_instance() -> Result<HANDLE> {
+/// Held for the process lifetime; a second engine run fails fast.
+/// Ok(None) when another aural instance already holds the mutex.
+pub fn acquire_single_instance() -> Result<Option<HANDLE>> {
     unsafe {
         let handle = CreateMutexW(None, true, w!("Global\\AuralKeyboardMutex"))?;
         if GetLastError() == ERROR_ALREADY_EXISTS {
             let _ = CloseHandle(handle);
-            anyhow::bail!("another aural instance is already running");
+            return Ok(None);
         }
-        Ok(handle)
+        Ok(Some(handle))
     }
 }
 
@@ -58,17 +55,16 @@ pub fn status() -> Option<u32> {
     }
 }
 
-pub fn start() -> Result<()> {
+pub fn start(exe: &std::path::Path) -> Result<()> {
     if let Some(pid) = status() {
         println!("aural: already running (pid {pid})");
         return Ok(());
     }
-    let exe = std::env::current_exe().context("current exe")?;
     // CreateProcessW with bInheritHandles=FALSE: the daemon must not inherit our
     // stdio pipes, or the caller's shell (PowerShell) waits on them forever.
     // The daemon redirects its own std handles to aural.log (see engine::run).
     let app: Vec<u16> = format!("{}\0", exe.display()).encode_utf16().collect();
-    let mut cmd: Vec<u16> = format!("\"{}\" run --daemon\0", exe.display())
+    let mut cmd: Vec<u16> = format!("\"{}\" system daemon\0", exe.display())
         .encode_utf16()
         .collect();
     unsafe {
@@ -106,11 +102,19 @@ pub fn start() -> Result<()> {
     anyhow::bail!("daemon did not report a PID in time")
 }
 
-/// Called by the daemon child (`run --daemon`) at startup: point our std handles
-/// at aural.log so engine logs land somewhere useful despite having no console.
+/// Called by the daemon child (`aural system daemon`) at startup: point our
+/// std handles at aural.log so engine logs land somewhere useful despite
+/// having no console, and detach from the console — the login Run key
+/// launches the daemon directly (no spawner to apply CREATE_NO_WINDOW), so
+/// without this its console window would linger for the whole session.
 pub fn redirect_stdio_to_log() {
     use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::System::Console::{SetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE};
+    use windows::Win32::System::Console::{
+        FreeConsole, SetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+    };
+    unsafe {
+        let _ = FreeConsole();
+    }
     let dir = crate::config::dir();
     std::fs::create_dir_all(&dir).ok();
     let Ok(f) = std::fs::OpenOptions::new()
@@ -136,51 +140,12 @@ pub fn stop() -> Result<()> {
     unsafe {
         let h = OpenProcess(PROCESS_TERMINATE, false, pid).context("opening daemon process")?;
         TerminateProcess(h, 0).context("terminating daemon")?;
+        // Wait for the exit so an immediate restart (`aural system install`)
+        // doesn't race the single-instance mutex.
+        WaitForSingleObject(h, 3000);
         let _ = CloseHandle(h);
     }
     let _ = std::fs::remove_file(crate::config::pid_path());
     println!("aural: stopped (pid {pid})");
-    Ok(())
-}
-
-fn open_run_key() -> Result<HKEY> {
-    unsafe {
-        let mut key = HKEY::default();
-        RegOpenKeyExW(
-            HKEY_CURRENT_USER,
-            w!(r"Software\Microsoft\Windows\CurrentVersion\Run"),
-            None,
-            KEY_SET_VALUE,
-            &mut key,
-        )
-        .ok()
-        .context("opening Run key")?;
-        Ok(key)
-    }
-}
-
-pub fn install() -> Result<()> {
-    let exe = std::env::current_exe().context("current exe")?;
-    let value = format!("\"{}\" start", exe.display());
-    let wide: Vec<u16> = value.encode_utf16().chain(std::iter::once(0)).collect();
-    unsafe {
-        let key = open_run_key()?;
-        let bytes = std::slice::from_raw_parts(wide.as_ptr() as *const u8, wide.len() * 2);
-        let r = RegSetValueExW(key, w!("AuralKeyboard"), None, REG_SZ, Some(bytes));
-        let _ = RegCloseKey(key);
-        r.ok().context("writing Run value")?;
-    }
-    println!("aural: will start at login");
-    Ok(())
-}
-
-pub fn uninstall() -> Result<()> {
-    unsafe {
-        let key = open_run_key()?;
-        let r = RegDeleteValueW(key, w!("AuralKeyboard"));
-        let _ = RegCloseKey(key);
-        r.ok().context("deleting Run value")?;
-    }
-    println!("aural: removed from login autostart");
     Ok(())
 }

@@ -62,5 +62,9 @@ target/
 # Scratch
 .temp/
 
+# ZCode workspace
+.zcode/
+
+
 # Soundfont source bundles (see scripts/extract-soundfonts.ps1)
 assets/source/

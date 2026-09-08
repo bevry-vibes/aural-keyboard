@@ -20,243 +20,127 @@ quietly, backspace cracks, `!` crashes). No mechanical-keyboard sounds, by desig
 
 Key release applies the original 0.5 s fade-out, so melodies ring naturally as you type.
 
-CLI only. No UI, no telemetry, no network. Keystrokes are mapped to notes in memory and
-immediately discarded — nothing is ever stored or sent anywhere.
-
-## Design
-
-### Status
-
-Windows 10+, **macOS (Apple Silicon)**, and **Linux (X11 or Wayland)** are supported
-from one codebase — see
-[`DESIGN.md`](DESIGN.md) for the full research, analysis, and decision register.
-macOS support has landed (2026-08-30) including a **menu-bar app**; Linux support has
-landed (2026-09-02) including a **system-tray app**. Live `bench` on Windows 10:
-**p50 5.5 ms / p95 9.4 ms** press→sound, under the 15 ms target. On macOS 26 (M1,
-CoreAudio, 128-frame buffer): live bench **p50 1.42 ms / p95 2.49 ms** (n=142).
-
-### Research
-
-[`DESIGN.md`](DESIGN.md) documents the original goal, the evaluation of all [23 reference
-projects](https://github.com/stars/balupton/lists/keyboard-sounds), the
-Rust/Swift/Go/Crystal/Zig language analysis, the latency architecture
-(lock-free SPSC ring → voice-pool mixer in the audio callback), and the decision register
-with explicit re-hash triggers.
+CLI-first, with an optional menu-bar (macOS) / system-tray (Linux) app. No telemetry, no
+network. Keystrokes are mapped to notes in memory and immediately discarded — nothing is
+ever stored or sent anywhere.
 
 ## Setup
 
-### Install
+### Get the binary
 
-The binary is named `aural`. Requires a [Rust toolchain](https://rustup.rs) (stable) —
-`cargo install` places `aural.exe` in `%USERPROFILE%\.cargo\bin`, which rustup puts on
-your PATH.
+Pick one:
 
-**From crates.io:**
+- **Prebuilt binaries** — download from
+  [Releases](https://github.com/bevry-vibes/aural-keyboard/releases): `aural-windows-x64.zip`,
+  `aural-linux-x64.tar.gz`, `aural-macos-arm64.zip`, or `aural-macos-arm64-Aural.app.zip`
+  (each with a sha256 sidecar). macOS downloads carry the quarantine attribute — after
+  unzipping, run `xattr -d com.apple.quarantine ./aural` (or on `Aural.app`) once.
+- **cargo install** — requires a [Rust toolchain](https://rustup.rs) (stable); puts `aural`
+  on your PATH:
 
-```powershell
-cargo install aural
-```
+  ```sh
+  cargo install aural                                            # from crates.io
+  cargo install --git https://github.com/bevry-vibes/aural-keyboard   # from the repo
+  ```
 
-**Straight from the repo (no clone needed):**
+- **Build locally**:
 
-```powershell
-cargo install --git https://github.com/bevry-vibes/aural-keyboard
-```
+  ```sh
+  git clone https://github.com/bevry-vibes/aural-keyboard
+  cd aural-keyboard
+  cargo build --release
+  ```
 
-**From a local clone:**
+  The binary lands at `target/release/aural` under the repo — or
+  `$CARGO_TARGET_DIR/release/aural` when that variable is set. Run it by that
+  path, or use `cargo install --path .` from the clone to put `aural` on your
+  PATH instead.
 
-```powershell
-git clone https://github.com/bevry-vibes/aural-keyboard
-cd aural-keyboard
-cargo install --path .
-```
+Compiling on Linux (cargo install or local build) needs the ALSA + tray dev packages
+(Fedora: `sudo dnf install alsa-lib-devel gtk3-devel libappindicator-gtk3-devel`;
+Debian/Ubuntu: `sudo apt install libasound2-dev libgtk-3-dev libappindicator3-dev`).
 
-**Prebuilt binary:** download `aural-windows-x64.zip` or `aural-macos-arm64.zip` /
-`aural-macos-arm64-Aural.app.zip` (each with a sha256 sidecar) from
-[Releases](https://github.com/bevry-vibes/aural-keyboard/releases); CI also uploads
-binaries as artifacts on every green build (see the Actions tab).
-macOS downloads carry the quarantine attribute — after unzipping, run
-`xattr -d com.apple.quarantine ./aural` (or on `Aural.app`) once.
+With the binary in hand, install the app once for your platform below — `aural system
+install` handles the permissions, starts now, and starts at every login. (The `Aural.app`
+zip needs no CLI at all: move it to `/Applications` or `~/Applications`, open it, and use
+its menu-bar **Enable at Login**.)
 
-Note: the `aural install` *subcommand* is a different thing — it registers an
-already-installed `aural` to start at login (Windows Run key / macOS LaunchAgent). See
-[Usage](#usage).
-
-### Building from source
-
-Requires a [Rust toolchain](https://rustup.rs) (stable). Sound samples are committed
-(see [Attribution](#attribution), CC BY 3.0 FluidR3_GM soundfont renderings), so a
-plain build is all you need:
-
-```powershell
-git clone https://github.com/bevry-vibes/aural-keyboard
-cd aural-keyboard
-cargo build --release
-target\release\aural.exe run
-```
-
-On Windows both the MSVC and GNU host toolchains work; with the GNU toolchain, binutils
-(`dlltool`) must be on PATH for linking. On macOS (Apple Silicon), any recent stable
-toolchain works; see the next section for the one permission the OS requires. On Linux,
-install the ALSA + tray build deps first (Fedora):
+### macOS
 
 ```sh
-sudo dnf install alsa-lib-devel gtk3-devel libappindicator-gtk3-devel
+aural system install
 ```
 
-(Debian/Ubuntu: `sudo apt install libasound2-dev libgtk-3-dev libappindicator3-dev`.)
+This installs `Aural.app` in `~/Applications`, starts it (a menu-bar entry appears), and
+starts it at every login. macOS asks once for **Input Monitoring** — the prompt names
+"Aural"; approve it in System Settings → Privacy & Security → Input Monitoring and the
+sounds start. If they stay silent after granting, run `aural system install` once more
+(it relaunches the app), or run `aural system doctor` for a diagnosis.
 
-Quality gates (enforced by CI): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`.
+### Windows
 
-### macOS: Input Monitoring permission
+```powershell
+aural system install
+```
 
-macOS gates keyboard capture behind System Settings → Privacy & Security → Input
-Monitoring. The prompt names the **responsible process** — the app macOS holds
-accountable — and the grant covers everything it runs. `aural` re-execs itself
-as its own responsible process on launch (self-disclaim), so the prompt and
-grant key to aural itself in every launch mode:
+Starts the engine now and at every login. No permissions needed.
 
-| How you run `aural` | Prompt names | Grant covers |
-|---|---|---|
-| `aural run` from a terminal | **aural** | only aural |
-| `open Aural.app --args run` (LaunchServices) | **Aural** | only aural |
-| `aural install` (LaunchAgent, at login) | **aural** | only the daemon binary |
-
-After granting or toggling the entry, **quit & reopen** aural — the grant only
-takes effect on a fresh launch. `aural doctor` disclaims too, so its Input
-Monitoring line reports aural's own grant (e.g. `granted` once aural is in the
-list); `aural doctor` also reports Secure Event Input state and names any app
-holding it.
-
-The self-disclaim uses the same mechanism Terminal.app/iTerm2 use; for a stable
-per-build identity, sign the app bundle with a self-signed certificate
-(Keychain Access → Certificate Assistant → Create a Certificate → Code Signing)
-and package with `AURAL_SIGN_IDENTITY="YourCert" ./scripts/package-app.sh`:
+### Linux
 
 ```sh
-cargo build --release
-./scripts/package-app.sh        # ad-hoc signs Aural.app (free, no Apple account)
-open target/release/Aural.app --args run
+aural system install
 ```
 
-### macOS menu-bar app
-
-`aural menubar` hosts the engine (daemon) in-process and adds a status-bar item
-with native checkboxes for **Mute** and **Enable at Login**, plus **Open Doctor**
-and **Quit** (`LSUIElement`, so no Dock icon). Requires the same Input Monitoring
-permission as `aural run`; grant it via System Settings → Privacy & Security →
-Input Monitoring after first launch.
-
-**Open Doctor** opens a new Terminal window running `aural doctor` (kept open so
-you can read the diagnostics). The menubar only runs from within the packaged
-`Aural.app` bundle — `aural menubar` from a bare binary refuses.
-
-For the Input Monitoring grant to survive rebuilds, sign the bundle with a stable
-self-signed identity (see `scripts/package-app.sh`); `package-app.sh` uses the
-"Aural Code Signing" identity automatically if it exists in the login keychain,
-falling back to ad-hoc otherwise.
-
-The menubar icon (`assets/aural-menubar.png`) was created by Microsoft Copilot.
-
-### Linux: input device access (`input` group)
-
-The Linux hook reads the kernel's evdev devices (`/dev/input/event*`) — the only
-global-capture route that works under both X11 and Wayland. Read access requires
-membership in the `input` group:
-
-```sh
-sudo usermod -aG input $USER   # then log out and back in
-```
-
-`aural doctor` reports whether access is granted; `aural run` fails with these
-instructions if it is not. Keys are translated to notes in memory and immediately
-discarded — nothing is logged or stored (see [Usage](#usage)).
-
-Note: evdev sits below the display server, so sounds also play on the lock screen
-(unlike the Windows/macOS hooks, which the OS silences in secure contexts).
-
-### Linux system-tray app
-
-`aural menubar` hosts the engine (daemon) in-process and adds a system-tray icon
-with checkboxes for **Mute** and **Enable at Login**, plus **Open Doctor** and
-**Quit**. It registers a StatusNotifierItem via libappindicator; **GNOME shows it
-only with the "AppIndicator and KStatusNotifierItem Support" extension enabled**:
+Asks for sudo once and sets up the hardened **dedicated-user mode**: the engine runs as a
+dedicated `aural` system user — the only account able to read keyboard devices — under a
+locked-down systemd service, with your CLI and tray sharing its state. Sound works
+immediately; your session-level conveniences (CLI mute/volume, the tray control surface)
+need one log out & back in (`aural system doctor` verifies the chain). On GNOME the tray
+icon needs the "AppIndicator and KStatusNotifierItem Support" extension:
 
 ```sh
 sudo dnf install gnome-shell-extension-appindicator
-# then enable and restart the shell (or log out/in):
-gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
+gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com   # then restart the shell
 ```
 
-`aural doctor` reports when no StatusNotifier host is present. `aural install`
-registers an XDG autostart entry (`~/.config/autostart/com.bevry.aural.desktop`)
-so the daemon starts at login.
-
-### Linux: dedicated-user mode (input isolation)
-
-Adding yourself to the `input` group (the quick route above) gives **everything
-running as your account** read access to all input devices. For stricter
-isolation, run the engine as a dedicated `aural` system user instead — then
-nothing running as you can read `/dev/input` at all:
-
-```sh
-sudo ./scripts/setup-dedicated-user.sh [path-to-aural-binary]
-# undo:
-sudo ./scripts/setup-dedicated-user.sh --uninstall
-# after logging out & back in — verify the whole chain (as yourself, no sudo):
-./scripts/setup-dedicated-user.sh --verify
-```
-
-What it does:
-
-- creates a `aural` system user (no shell, no groups) and a udev rule granting
-  **that user** read access to keyboard event nodes only — mice/touchpads stay
-  out of reach even for aural;
-- runs the engine via a hardened `aural.service` (systemd) at login; control it
-  with `systemctl status|start|stop aural` instead of `aural start/stop`;
-- bridges audio by granting the `aural` user traverse on your runtime dir at
-  each login (the pipewire sockets are already world-rw, so this exposes
-  audio only);
-- shares daemon state with your CLI/tray via `AURAL_CONFIG_DIR=/var/lib/aural`
-  (you join the `aural` group), so `aural mute|unmute|toggle|volume|status`,
-  the mute hotkey, and the tray all keep working;
-- the tray becomes a control surface: `aural menubar --no-engine`, autostarted
-  at every login via `aural-tray.desktop`.
-
-Everything daemon-side works immediately after setup (sound, mute hotkey);
-your **session-level** conveniences (CLI control, tray Mute persistence, and
-the actual removal of your `input`-group access) need one log out & back in —
-group and environment changes only apply to new sessions. `--verify` names
-exactly which side of that line each requirement is on.
-
-If you previously added yourself to the `input` group, undo it:
-
-```sh
-sudo gpasswd -d $USER input    # then log out & back in
-```
+Without systemd the install falls back to the simple mode: your user joins
+the `input` group and the tray hosts the engine. Details and security notes:
+[DESIGN.md](DESIGN.md) (§11).
 
 ## Usage
 
 ```text
-aural run                  run the engine in the foreground (Ctrl+C to quit)
-aural run --stdin          read keys from stdin, not the OS hook (testing; no permissions)
-aural start                start as a background daemon
-aural stop                 stop the daemon
-aural status               is it running?
-aural mute | unmute | toggle
-aural volume 60            set volume (0-100)
-aural install              start automatically at login (Windows Run key / macOS LaunchAgent / Linux XDG autostart)
-aural uninstall
-aural bench                measure press→sound latency (p50/p95/p99)
-aural doctor               diagnostics: device, buffer, hook, input access, assets
-aural menubar              (macOS, Linux) run as a tray/menubar agent: tray icon with Mute,
-                           Enable at Login, Open Doctor, and Quit
-aural menubar --no-engine  (Linux, dedicated-user mode) tray control surface only —
-                           the engine runs as the `aural` system user via systemd
-aural about                version + sound attribution
+aural                        print this help
+aural stdin                  read keys from stdin instead of the OS hook (testing; no permissions)
+aural system install         install the app — permissions included — and start it now + at login
+aural system uninstall       stop the app and remove everything the install created
+aural system enable          start the app automatically at login
+aural system disable         don't start the app automatically at login
+aural system doctor          diagnostics: engine, device, hook, permissions, install state
+aural system mute | unmute | toggle
+aural system volume 60       set volume (0-100)
+aural system bench           measure press→sound latency (p50/p95/p99)
+aural system about           version + sound attribution
 ```
 
-Global mute hotkey: **Ctrl+Shift+F12** (configurable).
+The menu-bar/tray app (macOS, Linux) covers the same ground visually: **Mute**,
+**Enable at Login**, **Install Aural** (greyed once installed), **Uninstall Aural**
+(greyed once removed), **Open Doctor**, and **Quit**.
+
+Global mute hotkey: **Ctrl+Shift+F12** (configurable via `config.json`, shown by
+`aural system doctor`).
+
+## Design
+
+Windows 10+, **macOS (Apple Silicon)**, and **Linux (X11 or Wayland)** are supported from
+one codebase. Live `bench` on Windows 10: **p50 5.5 ms / p95 9.4 ms** press→sound, under
+the 15 ms target. On macOS (M1, CoreAudio, 128-frame buffer): live bench **p50 1.42 ms /
+p95 2.49 ms**. [`DESIGN.md`](DESIGN.md) holds the full research, analysis, and decision
+register — the evaluation of all [23 reference projects](https://github.com/stars/balupton/lists/keyboard-sounds),
+the language analysis, the latency architecture (lock-free SPSC ring → voice-pool mixer
+in the audio callback), and every platform's implementation notes. It also holds the
+technical detail behind the setup above: the macOS TCC/permission model, app signing and
+packaging, building from source, and the Linux dedicated-user isolation mode.
 
 ## Attribution
 

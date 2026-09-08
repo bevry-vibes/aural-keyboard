@@ -1,9 +1,9 @@
 //! macOS-only process self-disclaim for TCC attribution, plus the
-//! Secure Event Input probe used by `aural doctor`.
+//! Secure Event Input probe used by `aural system doctor`.
 //!
 //! macOS grants Input Monitoring to the *responsible process* — normally the
 //! app that launched us (DESIGN.md §10 learning #1), so a terminal-launched
-//! `aural run` is attributed to the terminal. Terminal.app/iTerm2 break that
+//! run is attributed to the terminal. Terminal.app/iTerm2 break that
 //! inheritance with the private `responsibility_spawnattrs_setdisclaim`
 //! posix_spawn attribute, making the spawned process its own responsible app.
 //! We do the same by re-exec'ing ourselves: the re-exec'd process is its own
@@ -34,7 +34,7 @@ type SetDisclaim = unsafe extern "C" fn(*mut libc::posix_spawnattr_t, libc::c_in
 /// all spawn without `POSIX_SPAWN_SETEXEC`, since the disclaim flag is applied
 /// in the spawn child — `SETEXEC` bypasses it). The parent forwards
 /// SIGINT/SIGTERM/SIGHUP to the child and exits with its status, so a
-/// foreground `aural run` keeps normal Ctrl+C and exit-code behavior. The
+/// foreground run keeps normal Ctrl+C and exit-code behavior. The
 /// child inherits stdin/stdout/stderr (no file actions), which keeps
 /// `--stdin`, live `bench` typing, and foreground Ctrl+C working.
 pub fn disclaim() -> Result<()> {
@@ -173,7 +173,54 @@ fn wait_for(child: u32) -> i32 {
     }
 }
 
-// --- Secure Event Input (aural doctor) ---
+// --- stale TCC entry cleanup (before prompting) ---
+
+/// Before prompting for Input Monitoring, clear this identity's stale TCC
+/// rows so the System Settings list stays clean: every re-sign of the bundle
+/// can leave the prior row behind, and each unanswered request parks one —
+/// all worthless, since we just found we don't have access. `tccutil reset`
+/// only works for bundle identifiers, so this applies inside Aural.app
+/// ("com.bevry.aural"); a naked binary's identifier ("aural") is refused by
+/// tccutil (verified on macOS 26) and is skipped silently — macOS offers no
+/// third-party API to clear another identity's rows. Best-effort either way:
+/// a failure just leaves the old rows and never blocks the prompt path.
+pub fn reset_stale_tcc_entries() {
+    let Some(identifier) = code_signing_identifier() else {
+        return;
+    };
+    if !identifier.contains('.') {
+        return; // not a bundle identifier — tccutil cannot target it
+    }
+    let ok = std::process::Command::new("tccutil")
+        .args(["reset", "ListenEvent", &identifier])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if ok {
+        eprintln!("aural: cleared stale Input Monitoring entries for \"{identifier}\"");
+    }
+}
+
+/// The running binary's code-signing identifier from `codesign -dv` (printed
+/// on stderr): names its TCC rows.
+fn code_signing_identifier() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let out = std::process::Command::new("codesign")
+        .arg("-dv")
+        .arg("--verbose=2")
+        .arg(&exe)
+        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stderr);
+    let line = text.lines().find(|l| l.starts_with("Identifier="))?;
+    Some(line["Identifier=".len()..].trim().to_string())
+}
+
+// --- Secure Event Input (aural system doctor) ---
 
 /// True while any app holds "Secure Event Input": macOS withholds keyDown/keyUp
 /// from ALL event taps system-wide (only flagsChanged leaks) until it is
@@ -197,7 +244,7 @@ pub fn secure_input_enabled() -> bool {
     }
 }
 
-/// `aural doctor` line: `secure input: not active` normally; when active,
+/// `aural system doctor` line: `secure input: not active` normally; when active,
 /// names the holding app via IORegistry's `kCGSSessionSecureInputPID`.
 pub fn secure_input_check() -> String {
     if !secure_input_enabled() {

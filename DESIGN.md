@@ -119,6 +119,9 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
 - **CLI:** `run`, `start/stop/status` (PID file), `install/uninstall` (Run key),
   `mute/unmute/toggle` (+ configurable global hotkey, default Ctrl+Shift+F12),
   `volume`, `bench` (p50/p95/p99 hook→mix), `doctor`, `about`.
+  *(Superseded 2026-09-08/09 — see §14: the surface is now `aural stdin` and
+  `aural system …` only; bare `aural` prints help; the old commands were
+  removed, not deprecated.)*
 - **Quality:** mapping unit tests vs. derived test vectors; mixer tests (envelope ±1
   sample; no-alloc proof); CI fmt/clippy/test/build; release = zip + sha256.
 - **Targets:** p95 < 15 ms press→sound (`bench`-verified 2026-08-04: p50 5.5, p95 9.4, p99 9.6, max 9.8 ms; n=212, 128-frame buffer @ 48 kHz, Windows 10); CPU ~0% idle; clean device-loss
@@ -233,10 +236,21 @@ audio callback, hooks+audio ecosystem per OS, single-binary/cross-compile, prior
   migrating to ayatana); if it breaks on a future desktop stack, swap the Linux
   shell to `ksni` (pure-Rust StatusNotifierItem over DBus) — the shared menu
   logic is the only part that would change.
-- **Dedicated-user hardening (2026-09-03).** The `input`-group requirement
+- **Dedicated-user hardening (2026-09-03; superseded 2026-09-09 — the setup
+  script was absorbed into `aural system install` itself, see §14; the notes
+  below remain the authoritative record of what the binary now installs).**
+  The `input`-group requirement
   grants every process of the invoking user read access to all input devices;
   for stricter isolation `scripts/setup-dedicated-user.sh` moves the engine to
-  a `aural` system user: a udev rule ACLs keyboard-only event nodes
+  a `aural` system user. Usage (all idempotent; rerun to update the binary):
+
+  ```sh
+  sudo ./scripts/setup-dedicated-user.sh [path-to-aural-binary]
+  sudo ./scripts/setup-dedicated-user.sh --uninstall
+  ./scripts/setup-dedicated-user.sh --verify   # as yourself, after relogin
+  ```
+
+  It creates a udev rule ACLing keyboard-only event nodes
   (`ID_INPUT_KEYBOARD`) to that user (no groups anywhere), a hardened
   `aural.service` runs the engine, and audio is bridged by granting the user
   traverse on the session runtime dir at each login — sufficient because
@@ -692,3 +706,154 @@ too long; these are the hard-won lessons so it never recurs.
 - If PipeWire or WirePlumber tightens cross-UID client access by default, the
   dedicated-user audio bridge (§11) needs revisiting — tracked in the §11
   dedicated-user notes.
+
+## 14. CLI restructure & self-contained install (2026-09-08 → 09-09)
+
+End-user feedback drove this, in three rounds: the README's
+build-from-source + `package-app.sh` flow was broken under `CARGO_TARGET_DIR`;
+the CLI had six overlapping run modes (`run`, `run --stdin`, `start`/`stop`,
+`install`/`uninstall`, `menubar`/`menubar --no-engine`); and a `cargo install`
+user never has the repo's `scripts/` directory, so the binary had to absorb
+the setup machinery itself. The final surface — everything else was removed
+outright (typing an old name gets clap's unrecognized-subcommand error, not a
+deprecation shim):
+
+| Command | Effect |
+|---|---|
+| `aural` | same as `aural --help` |
+| `aural stdin` | stdin mode — no hook, no permissions |
+| `aural system install` | install the app (permissions included), start now + at login |
+| `aural system uninstall` | stop the app, remove everything the install created |
+| `aural system enable` / `disable` | toggle start-at-login |
+| `aural system doctor` | diagnostics incl. engine state and the install chain |
+| `aural system mute` / `unmute` / `toggle` / `volume` / `bench` / `about` | control & diagnostics |
+
+Three **hidden internal** subcommands remain because the machinery invokes
+the binary across a process boundary (login entries, detached spawners,
+systemd units) — a command line is the only interface that crosses:
+
+- `aural system daemon` — the engine in daemon mode; the child that
+  `daemon::spawn_detached` launches, the Windows Run key runs at login, and
+  the Linux systemd unit's `ExecStart`.
+- `aural system tray` — the menu-bar/tray app; the macOS LaunchAgent (explicit
+  `system tray` args), the Linux XDG autostart entry, and the dedicated-user
+  `aural-tray.desktop`. **No `--no-engine`**: the tray auto-detects by probing
+  the single-instance lock — held by another instance (the system-user
+  daemon) → control surface (Mute/Open Doctor/Quit; lifecycle items hidden);
+  free → hosts the engine. The probe releases before the engine thread takes
+  the real lock; a race there just degrades the tray to control surface.
+- `aural system acl-wait <user> <uid> <timeout>` — the pipewire audio bridge
+  (Rust port of the script's generated helper): wait for the session socket,
+  then `setfacl` traverse on the runtime dir + rw on the socket.
+
+**Bare `aural` = help**, with one exception: inside the Aural.app bundle a
+no-argument launch runs the tray — double-clicking the app must behave like
+an app (Finder/`open` pass no args).
+
+### What `aural system install` does per platform
+
+- **macOS** — wraps this binary as `~/Applications/Aural.app` (copy + embedded
+  `AppIcon.icns` + `LSUIElement` plist + code-sign: prefer the stable
+  "Aural Code Signing" self-signed identity so the TCC grant survives
+  reinstall, else `AURAL_SIGN_IDENTITY`, else ad-hoc). LaunchAgent
+  `ProgramArguments` = `[bundle binary, system, tray]`; launches via `open`
+  right after install (LaunchServices attributes the TCC prompt to "Aural").
+- **Linux** — new `src/system/linux.rs`, the dedicated-user mode absorbed from
+  the (deleted) `scripts/setup-dedicated-user.sh`. Two phases: the user phase
+  explains the plan and re-execs `sudo <exe> system install`; the root phase
+  (euid 0 + `SUDO_USER`) writes everything — `aural` system user + group,
+  group-writable `/var/lib/aural` state, binary copied to
+  `/usr/local/bin/aural` (immune to `cargo clean`), the keyboard-only udev
+  ACL rule, the hardened `aural.service` (`ExecStart=aural system daemon`,
+  `ExecStartPre=+aural system acl-wait`, full sandbox block),
+  `AURAL_CONFIG_DIR` via environment.d + profile.d, the per-login
+  `aural-pipewire-acl.service`, and the tray autostart. All file contents are
+  equivalent to the proven script — the §11 lessons carry over verbatim.
+  Without systemd: fallback to the simple mode (input group + autostarted
+  engine-hosting tray). `enable`/`disable` = `systemctl enable/disable` (sudo
+  re-exec); `uninstall` is the script's `--uninstall` ported (stop/disable
+  units, revoke ACL, remove files, drop group/user/state); `doctor` absorbed
+  `--verify` (`linux::verify_chain`).
+- **Windows** — copies the exe to `%LOCALAPPDATA%\Programs\aural\aural.exe`;
+  the Run key runs `"<copy>" system daemon` at login. The daemon
+  `FreeConsole()`s itself at startup — the Run key launches it directly (no
+  `start` intermediary to apply CREATE_NO_WINDOW), so without that its
+  console would linger for the whole session.
+
+### Bugs the restructure exposed and fixed
+
+- **engine writes the PID file in every mode** (foreground, daemon,
+  tray-hosted) and writes it *before* installing the hook — the macOS grant
+  wait can block there for minutes, and a blocked instance must stay visible
+  to `aural system doctor`/`uninstall` (found during smoke-testing: a
+  grant-blocked daemon was invisible and unkillable via the CLI).
+- **Single-instance actually excludes on unix** — `flock` returning Ok(None)
+  used to fall through and run a *second* engine alongside the first
+  (Windows bailed; unix didn't — latent double-sound bug). Both now bail.
+  `stop()` also waits for the instance to exit (≤3 s) so install's
+  stop-then-start doesn't race the lock.
+- **Stale TCC entries auto-cleared before prompting** (user report: three
+  "aural" rows in Input Monitoring). Every ad-hoc rebuild changes the cdhash
+  and leaves the prior row behind, and every unanswered request parks one —
+  all worthless on the "we don't have access" path. Both
+  `CGRequestListenEventAccess` sites first run
+  `tccutil reset ListenEvent <code-signing identifier>` ("aural" for a naked
+  binary, "com.bevry.aural" in the bundle), so only *this* identity's rows
+  clear; a grant under the other identity is untouched.
+
+### The tray menu
+
+Mute (check), Enable at Login (check), Install Aural, Uninstall Aural,
+Open Doctor, Quit — the install items greyed to match reality (Install when
+`system::installed()` — the artifacts exist — and Uninstall when not), and all
+three lifecycle items hidden to Mute/Doctor/Quit in control-surface mode.
+Invoking install/uninstall from within the running app is self-safe:
+`install()` short-circuits to the login registration when the recorded
+instance pid is this process; `uninstall()` removes files *before* the stop
+that kills this process (on macOS the bundle is removed while still
+executing from it — unlink only).
+
+### Scripts
+
+`setup-dedicated-user.sh` deleted (absorbed into `system/linux.rs`).
+`package-app.sh` remains the CI/dev packager for the release `Aural.app` zip
+(`release.yml`) — not part of user install. `extract-soundfonts.ps1` and the
+icon scripts are provenance/dev-only.
+
+### Moved from README: macOS TCC attribution (updated)
+
+macOS gates keyboard capture behind System Settings → Privacy & Security →
+Input Monitoring. The prompt names the **responsible process** — the app
+macOS holds accountable — and the grant covers everything it runs. `aural`
+re-execs itself as its own responsible process on launch (self-disclaim,
+§10), so the prompt and grant key to aural itself in every mode:
+
+| How you run aural | Prompt names | Grant covers |
+|---|---|---|
+| the app (`open Aural.app` / double-click / login) | **Aural** | only aural |
+| a terminal-launched engine (the hidden daemon command) | **aural** | only aural |
+
+After granting or toggling the entry, **relaunch** aural — the grant only
+takes effect on a fresh launch (`aural system install` relaunches the app).
+`aural system doctor` disclaims too, so its Input Monitoring line reports
+the *CLI binary's* grant — the app (stable bundle identity) can be granted
+while a freshly built ad-hoc CLI is not; the message names both cases.
+Doctor also reports Secure Event Input state and names any app holding it.
+
+### Moved from README: signing, packaging, building
+
+- **App signing** — the grant is keyed to the code signature, so ad-hoc
+  rebuilds re-prompt. For a stable identity, create a self-signed
+  code-signing certificate (Keychain Access → Certificate Assistant →
+  Create a Certificate → Code Signing). `aural system install` uses
+  `AURAL_SIGN_IDENTITY` if set, else the "Aural Code Signing" identity if
+  present in the login keychain, else ad-hoc — same rules as
+  `scripts/package-app.sh`.
+- **Building from source** — `git clone … && cargo install --path .` (or
+  `cargo build --release`). On Windows both MSVC and GNU host toolchains
+  work; with the GNU toolchain, binutils (`dlltool`) must be on PATH for
+  linking. Linux needs the ALSA + tray dev packages (Fedora:
+  `alsa-lib-devel gtk3-devel libappindicator-gtk3-devel`; Debian/Ubuntu:
+  `libasound2-dev libgtk-3-dev libappindicator3-dev`). Quality gates
+  (enforced by CI): `cargo fmt --check`, `cargo clippy --all-targets --
+  -D warnings`, `cargo test`.

@@ -1,6 +1,12 @@
-//! menubar — `aural menubar`: a tiny tray/menubar shell that hosts the engine
-//! on a worker thread and exposes: `Mute` (check), `Enable at Login` (check),
-//! `Open Doctor`, `Quit`.
+//! menubar — the menu-bar (macOS) / system-tray (Linux) app: the internal
+//! `aural system tray` command (installed by `aural system install`, not
+//! user-facing). Hosts the engine on a worker thread and exposes `Mute`
+//! (check), `Enable at Login` (check), the install items,
+//! `Install Aural` (greyed when installed), `Uninstall Aural` (greyed when
+//! not), `Open Doctor`, and `Quit` — unless the single-instance lock is held by
+//! another instance (Linux dedicated-user mode, where the engine runs as the
+//! `aural` system user under systemd), in which case it is a control surface
+//! (Mute/Open Doctor/Quit) sharing the daemon's config.
 //!
 //! Both platform shells use the `tray-icon` crate (thin around AppKit on
 //! macOS, GTK + libappindicator on Linux), so the menu construction and event
@@ -33,38 +39,49 @@ use tray_icon::TrayIconBuilder;
 /// Menu item ids handled in `handle_event`.
 const ID_MUTE: &str = "mute";
 const ID_LOGIN: &str = "login";
+const ID_INSTALL: &str = "install";
+const ID_UNINSTALL: &str = "uninstall";
 const ID_DOCTOR: &str = "doctor";
 const ID_QUIT: &str = "quit";
+
+/// Should this tray host the engine? Probes the single-instance lock: free →
+/// we host; held by another instance (the dedicated-user daemon) → control
+/// surface only. The probe acquires and immediately releases — the engine
+/// thread does the real acquire moments later; if something slips in between,
+/// the engine fails with "already running" and the tray degrades to a control
+/// surface anyway.
+#[cfg(target_os = "linux")]
+fn probe_hostable() -> bool {
+    crate::daemon::acquire_single_instance()
+        .map(|guard| guard.is_some())
+        .unwrap_or(false)
+}
+
+/// Spawn the engine on its worker thread (stderr → log, failures logged —
+/// when launched via `open`/autostart, stderr is otherwise discarded).
+fn spawn_engine() -> std::thread::JoinHandle<()> {
+    std::thread::spawn(|| {
+        redirect_stderr_to_log();
+        if let Err(e) = crate::engine::run(false, false, None) {
+            eprintln!("aural tray: engine error: {e:#}");
+        }
+    })
+}
 
 // --- macOS shell (NSStatusItem via AppKit) ---
 
 #[cfg(target_os = "macos")]
-pub fn run(no_engine: bool) -> Result<()> {
-    // `--no-engine` is a Linux dedicated-user-mode flag; the macOS menubar
-    // always hosts the engine inside the Aural.app bundle.
-    let _ = no_engine;
+pub fn run() -> Result<()> {
     // The menubar is a UI shell that only makes sense inside the packaged
     // Aural.app bundle (LSUIElement agent). Refuse to run from a bare binary so
     // the status item doesn't appear for terminal/CLI usage.
     if !in_app_bundle() {
         anyhow::bail!(
-            "aural menubar: only runs from within the Aural.app bundle\n  \
-             → build with `cargo build --release`, then `./scripts/package-app.sh`\n    \
-             and `open target/release/Aural.app --args menubar`."
+            "aural system tray: only runs from the installed Aural.app\n  \
+             → install it with `aural system install`"
         );
     }
-
-    // Engine on a worker thread; it installs the keyboard hook, needs the TCC
-    // disclaim, and hot-reloads `config.json` for mute/volume within 500 ms.
-    // Redirect the engine's stderr to the log file (when launched via `open`
-    // stderr is discarded) and log its result so a hook/audio failure isn't
-    // silent.
-    let engine = std::thread::spawn(|| {
-        redirect_stderr_to_log();
-        if let Err(e) = crate::engine::run(false, false, None) {
-            eprintln!("aural menubar: engine error: {e:#}");
-        }
-    });
+    let engine = spawn_engine();
 
     let icon = load_icon().context("loading menubar icon")?;
     let menu = build_menu(true)?;
@@ -86,7 +103,7 @@ pub fn run(no_engine: bool) -> Result<()> {
     MenuEvent::set_event_handler(Some(|event| match handle_event(&event) {
         Ok(true) => stop_ui(),
         Ok(false) => {}
-        Err(e) => eprintln!("aural menubar: {e:#}"),
+        Err(e) => eprintln!("aural tray: {e:#}"),
     }));
 
     // Run the AppKit main loop. This services every run-loop mode (including
@@ -103,31 +120,29 @@ pub fn run(no_engine: bool) -> Result<()> {
 // --- Linux shell (StatusNotifierItem via GTK + libappindicator) ---
 
 #[cfg(target_os = "linux")]
-pub fn run(no_engine: bool) -> Result<()> {
-    // With `--no-engine` (dedicated-user mode) the tray is a control surface
-    // only: the engine runs as the `aural` system user via systemd
-    // (scripts/setup-dedicated-user.sh), and Mute works through the shared
-    // AURAL_CONFIG_DIR. stderr stays visible in this mode (no log redirect).
-    let engine = if no_engine {
-        None
+pub fn run() -> Result<()> {
+    // Dedicated-user mode auto-detect: when another instance holds the
+    // single-instance lock (the engine running as the `aural` system user via
+    // systemd), this tray is a control surface only — Mute works through the
+    // shared AURAL_CONFIG_DIR, and the lifecycle menu items hide (systemd
+    // owns them).
+    let hosted = probe_hostable();
+    let engine = if hosted {
+        Some(spawn_engine())
     } else {
-        Some(std::thread::spawn(|| {
-            redirect_stderr_to_log();
-            if let Err(e) = crate::engine::run(false, false, None) {
-                eprintln!("aural menubar: engine error: {e:#}");
-            }
-        }))
+        eprintln!("aural tray: another aural instance is running — control surface only");
+        None
     };
 
     let icon = load_icon().context("loading tray icon")?;
-    let menu = build_menu(!no_engine)?;
+    let menu = build_menu(hosted)?;
 
     // GTK must be initialized (on the main thread) before building the icon.
     gtk::init().context("initializing GTK (a display server / Wayland session is required)")?;
 
     // The tray registers as a StatusNotifierItem via libappindicator. GNOME
     // shows it only with the "AppIndicator and KStatusNotifierItem Support"
-    // extension enabled; `aural doctor` reports when the host is missing.
+    // extension enabled; `aural system doctor` reports when the host is missing.
     let _tray = TrayIconBuilder::new()
         .with_tooltip("aural — melodic keyboard sounds")
         .with_icon(icon)
@@ -141,13 +156,19 @@ pub fn run(no_engine: bool) -> Result<()> {
     let last_mtime = std::cell::Cell::new(crate::config::mtime());
     gtk::glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
         while let Ok(event) = menu_rx.try_recv() {
+            let was_install = event.id().0 == ID_INSTALL || event.id().0 == ID_UNINSTALL;
             match handle_event(&event) {
                 Ok(true) => {
                     gtk::main_quit();
                     return gtk::glib::ControlFlow::Break;
                 }
                 Ok(false) => {}
-                Err(e) => eprintln!("aural menubar: {e:#}"),
+                Err(e) => eprintln!("aural tray: {e:#}"),
+            }
+            // muda auto-toggled the clicked checkbox; reality gets the final
+            // say (an uninstall here usually kills the process anyway).
+            if was_install {
+                menu.sync_install_state();
             }
         }
         // Keep the Mute checkbox in sync with the shared config: the CLI and
@@ -188,11 +209,23 @@ fn handle_event(event: &MenuEvent) -> Result<bool> {
             // The engine hot-reloads config within 500 ms.
         }
         ID_LOGIN => {
-            if crate::daemon::login_enabled() {
-                crate::daemon::uninstall()?;
+            if crate::system::login_enabled() {
+                crate::system::disable_login()?;
             } else {
-                crate::daemon::install()?;
+                crate::system::enable_login()?;
             }
+        }
+        ID_INSTALL => {
+            // Self-aware: when this tray is the running instance (the usual
+            // case), install reduces to ensuring the login registration.
+            crate::system::install()?;
+        }
+        ID_UNINSTALL => {
+            // Removes the login registration and app files, then stops the
+            // running instance — this process — so we usually never return;
+            // Ok(true) quits the UI if we somehow do.
+            crate::system::uninstall()?;
+            return Ok(true);
         }
         ID_DOCTOR => {
             spawn_doctor();
@@ -201,7 +234,7 @@ fn handle_event(event: &MenuEvent) -> Result<bool> {
             return Ok(true);
         }
         other => {
-            eprintln!("aural menubar: unknown menu id {other:?}");
+            eprintln!("aural tray: unknown menu id {other:?}");
         }
     }
     Ok(false)
@@ -211,10 +244,7 @@ fn handle_event(event: &MenuEvent) -> Result<bool> {
 /// Aural.app), so the menubar only appears for the GUI agent, not a bare CLI.
 #[cfg(target_os = "macos")]
 fn in_app_bundle() -> bool {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.ends_with("MacOS")))
-        .unwrap_or(false)
+    crate::system::in_app_bundle()
 }
 
 /// Point this process's stderr at the aural log file. When launched via
@@ -278,19 +308,44 @@ fn load_icon() -> Result<tray_icon::Icon> {
     Ok(tray_icon::Icon::from_rgba(frame, width, height)?)
 }
 
-/// The parent `Menu` plus the Mute checkbox handle — the checkbox is kept in
-/// sync with the shared config (the CLI and mute hotkey change it outside
-/// this process). `include_login` hides "Enable at Login" in dedicated-user
-/// mode, where login persistence belongs to the systemd service.
+/// The parent `Menu` plus the checkbox handles kept in sync with the outside
+/// world: `mute` follows the shared config (the CLI and mute hotkey change it
+/// outside this process), and the install items follow the install state
+/// (muda auto-toggles a clicked checkbox, so reality gets the final say via
+/// `sync_install_state`). `hosted` = this tray hosts the engine, so the whole
+/// app lifecycle belongs in the menu; in dedicated-user mode the systemd
+/// service owns install/login, so those items are hidden.
 struct AppMenu {
     menu: Menu,
-    // macOS never reads the handle (AppKit auto-toggles the checkbox); it is
-    // still kept so both platforms share the menu construction below.
+    // macOS never reads these handles (AppKit auto-toggles, and Uninstall
+    // kills the process); they are kept so both platforms share the
+    // construction below and Linux can reconcile after clicks.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     mute: CheckMenuItem,
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    install: CheckMenuItem,
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    uninstall: CheckMenuItem,
 }
 
-fn build_menu(include_login: bool) -> Result<AppMenu> {
+impl AppMenu {
+    /// Re-check/grey the install items to match reality: the checked-and-
+    /// greyed one names the current state (Install ✓ = installed, Uninstall ✓
+    /// = uninstalled), the enabled unchecked one is the actionable transition.
+    /// (Linux only: muda auto-toggles a clicked checkbox; macOS's AppKit
+    /// toggles too, but there the items can't change state — Install is
+    /// disabled whenever installed, and Uninstall quits the process.)
+    #[cfg(target_os = "linux")]
+    fn sync_install_state(&self) {
+        let installed = crate::system::installed();
+        self.install.set_checked(installed);
+        self.install.set_enabled(!installed);
+        self.uninstall.set_checked(!installed);
+        self.uninstall.set_enabled(installed);
+    }
+}
+
+fn build_menu(hosted: bool) -> Result<AppMenu> {
     let menu = Menu::new();
     let cfg = crate::config::load();
 
@@ -302,20 +357,52 @@ fn build_menu(include_login: bool) -> Result<AppMenu> {
         .build();
     menu.append(&mute)?;
 
-    // "Enable at Login" toggles the XDG autostart entry — meaningful only when
+    // "Enable at Login" toggles the autostart entry — meaningful only when
     // this process hosts the engine. In dedicated-user mode login persistence
     // is owned by the systemd service instead.
-    if include_login {
+    if hosted {
         let login = CheckMenuItemBuilder::new()
             .id(MenuId(ID_LOGIN.to_string()))
             .text("Enable at Login")
             .enabled(true)
-            .checked(crate::daemon::login_enabled())
+            .checked(crate::system::login_enabled())
             .build();
         menu.append(&login)?;
     }
 
     menu.append(&PredefinedMenuItem::separator())?;
+
+    let (install, uninstall) = if hosted {
+        // Check items doubling as state indicators (see `sync_install_state`).
+        let installed = crate::system::installed();
+        let install = CheckMenuItemBuilder::new()
+            .id(MenuId(ID_INSTALL.to_string()))
+            .text("Install Aural")
+            .enabled(!installed)
+            .checked(installed)
+            .build();
+        menu.append(&install)?;
+
+        let uninstall = CheckMenuItemBuilder::new()
+            .id(MenuId(ID_UNINSTALL.to_string()))
+            .text("Uninstall Aural")
+            .enabled(installed)
+            .checked(!installed)
+            .build();
+        menu.append(&uninstall)?;
+        (install, uninstall)
+    } else {
+        // Dedicated-user mode: the items are hidden; placeholder handles keep
+        // the construction uniform (never read).
+        let placeholder = || {
+            CheckMenuItemBuilder::new()
+                .id(MenuId(String::new()))
+                .text("")
+                .enabled(false)
+                .build()
+        };
+        (placeholder(), placeholder())
+    };
 
     let doctor = MenuItemBuilder::new()
         .id(MenuId(ID_DOCTOR.to_string()))
@@ -326,18 +413,23 @@ fn build_menu(include_login: bool) -> Result<AppMenu> {
 
     let quit = MenuItemBuilder::new()
         .id(MenuId(ID_QUIT.to_string()))
-        .text("Quit aural")
+        .text("Quit Aural")
         .enabled(true)
         .build();
     menu.append(&quit)?;
 
-    Ok(AppMenu { menu, mute })
+    Ok(AppMenu {
+        menu,
+        mute,
+        install,
+        uninstall,
+    })
 }
 
 // --- doctor window (Open Doctor menu item) ---
 
-/// Open `aural doctor` in a visible terminal window so the user actually sees
-/// the diagnostics. `aural doctor` is a one-shot that exits, so the script
+/// Open `aural system doctor` in a visible terminal window so the user actually sees
+/// the diagnostics. `aural system doctor` is a one-shot that exits, so the script
 /// keeps the window open after it finishes.
 #[cfg(target_os = "macos")]
 fn spawn_doctor() {
@@ -347,7 +439,7 @@ fn spawn_doctor() {
     let exe = exe.display().to_string();
     // A tiny script that runs doctor and keeps the window open afterwards.
     let script = format!(
-        "#!/bin/sh\n\"{exe}\" doctor\necho\necho \"--- aural doctor finished (press any key to close) ---\"\nread -r _\n"
+        "#!/bin/sh\n\"{exe}\" system doctor\necho\necho \"--- aural system doctor finished (press any key to close) ---\"\nread -r _\n"
     );
     let dir = crate::config::dir();
     let script_path = dir.join("aural-doctor.sh");
@@ -375,7 +467,7 @@ fn spawn_doctor() {
     };
     let exe = exe.display().to_string();
     let script = format!(
-        "#!/bin/sh\n\"{exe}\" doctor\necho\necho \"--- aural doctor finished (press any key to close) ---\"\nread -r _\n"
+        "#!/bin/sh\n\"{exe}\" system doctor\necho\necho \"--- aural system doctor finished (press any key to close) ---\"\nread -r _\n"
     );
     let dir = crate::config::dir();
     let _ = std::fs::create_dir_all(&dir);
@@ -404,7 +496,10 @@ fn spawn_doctor() {
         }
     }
     // No terminal emulator found: append the diagnostics to the log.
-    if let Ok(out) = std::process::Command::new(&exe).arg("doctor").output() {
+    if let Ok(out) = std::process::Command::new(&exe)
+        .args(["system", "doctor"])
+        .output()
+    {
         let _ = std::fs::write(dir.join("aural-doctor.out"), &out.stdout);
     }
 }

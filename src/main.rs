@@ -1,39 +1,50 @@
 //! aural — system-wide melodic keyboard sounds (CLI entry point).
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
     name = "aural",
     version,
-    about = "System-wide melodic keyboard sounds (aural-coding, ported to the OS)"
+    about = "System-wide melodic keyboard sounds (aural-coding, ported to the OS)",
+    long_about = "System-wide melodic keyboard sounds (aural-coding, ported to the OS).\n\n\
+                  Install the app once with `aural system install` — it handles the\n\
+                  permissions, starts now, and starts at every login. `aural stdin` plays\n\
+                  from stdin for quick testing (no permissions needed)."
 )]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
 enum Command {
-    /// Run in the foreground (Ctrl+C to quit)
-    Run {
-        #[arg(long, hide = true)]
-        daemon: bool,
-        /// Read keys from stdin instead of the system hook (testing; no permissions needed)
-        #[arg(long)]
-        stdin: bool,
+    /// Manage the installed app: install/uninstall, login autostart, mute,
+    /// diagnostics
+    #[command(subcommand_required = true, arg_required_else_help = true)]
+    System {
+        #[command(subcommand)]
+        action: SystemAction,
     },
-    /// Start as a background daemon
-    Start,
-    /// Stop the daemon
-    Stop,
-    /// Is the daemon running?
-    Status,
-    /// Start automatically at login (Windows Run key / macOS LaunchAgent / Linux XDG autostart)
+    /// Read keys from stdin instead of the OS hook (testing; no permissions needed)
+    Stdin,
+}
+
+#[derive(Subcommand)]
+enum SystemAction {
+    /// Install the app (menu-bar/tray entry, or the background daemon on
+    /// Windows), handling the permissions it needs, then start it now and at
+    /// every login
     Install,
-    /// Remove from login autostart
+    /// Stop the app and remove everything the install created
     Uninstall,
+    /// Start the app automatically at login
+    Enable,
+    /// Don't start the app automatically at login
+    Disable,
+    /// Diagnostics: engine, device, buffer, hook, input access, install state
+    Doctor,
     /// Mute all sounds
     Mute,
     /// Unmute
@@ -48,18 +59,26 @@ enum Command {
         #[arg(long)]
         synthetic: Option<usize>,
     },
-    /// Diagnostics: device, buffer, assets, daemon state
-    Doctor,
-    /// (macOS, Linux) run as a tray/menubar app with mute / login / doctor / quit
-    Menubar {
-        /// Don't host the engine — Linux dedicated-user mode only: the engine
-        /// runs as the `aural` system user via systemd; this tray becomes a
-        /// control surface (Mute via the shared config dir, Open Doctor, Quit)
-        #[arg(long)]
-        no_engine: bool,
-    },
     /// Version and sound attribution
     About,
+
+    // Hidden internal commands — the install machinery invokes these across a
+    // process boundary (login entries, the detached spawner, systemd units);
+    // they are not for users.
+    /// (internal) the engine in background-daemon mode
+    #[command(hide = true)]
+    Daemon,
+    /// (internal) the menu-bar/tray app
+    #[command(hide = true)]
+    Tray,
+    /// (internal) wait for the session's pipewire socket, then grant the
+    /// dedicated engine user audio access (Linux)
+    #[command(hide = true)]
+    AclWait {
+        user: String,
+        uid: u32,
+        timeout: u64,
+    },
 }
 
 fn main() -> Result<()> {
@@ -68,102 +87,131 @@ fn main() -> Result<()> {
     // Input Monitoring grant to aural itself, not the launching terminal —
     // only for commands that install the keyboard hook.
     #[cfg(target_os = "macos")]
-    if disclaim_needed(&cli.command) {
+    if disclaim_needed(cli.command.as_ref()) {
         aural::macos::disclaim()?;
     }
     match cli.command {
-        Command::Run { daemon, stdin } => {
+        None => run_default(),
+        Some(Command::Stdin) => {
             aural::engine::install_ctrlc();
-            aural::engine::run(daemon, stdin, None)
+            aural::engine::run(false, true, None)
         }
-        Command::Start => aural::daemon::start(),
-        Command::Stop => aural::daemon::stop(),
-        Command::Status => {
-            match aural::daemon::status() {
-                Some(pid) => println!("aural: running (pid {pid})"),
-                None => println!("aural: not running"),
+        Some(Command::System { action }) => match action {
+            SystemAction::Install => aural::system::install(),
+            SystemAction::Uninstall => aural::system::uninstall(),
+            SystemAction::Enable => aural::system::enable(),
+            SystemAction::Disable => aural::system::disable(),
+            SystemAction::Doctor => doctor(),
+            SystemAction::Mute => set_muted(true),
+            SystemAction::Unmute => set_muted(false),
+            SystemAction::Toggle => toggle_muted(),
+            SystemAction::Volume { value } => {
+                let v = (value / 100.0).clamp(0.0, 1.0);
+                aural::config::update(|c| c.volume = v)?;
+                println!("aural: volume {}%", (v * 100.0).round() as u32);
+                Ok(())
             }
-            Ok(())
-        }
-        Command::Install => aural::daemon::install(),
-        Command::Uninstall => aural::daemon::uninstall(),
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
-        Command::Menubar { no_engine } => aural::menubar::run(no_engine),
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-        Command::Menubar { .. } => {
-            eprintln!("aural menubar: not supported on this platform");
-            std::process::exit(1);
-        }
-        Command::Mute => {
-            aural::config::update(|c| c.muted = true)?;
-            println!("aural: muted");
-            Ok(())
-        }
-        Command::Unmute => {
-            aural::config::update(|c| c.muted = false)?;
-            println!("aural: unmuted");
-            Ok(())
-        }
-        Command::Toggle => {
-            let c = aural::config::update(|c| c.muted = !c.muted)?;
-            println!("aural: {}", if c.muted { "muted" } else { "unmuted" });
-            Ok(())
-        }
-        Command::Volume { value } => {
-            let v = (value / 100.0).clamp(0.0, 1.0);
-            aural::config::update(|c| c.volume = v)?;
-            println!("aural: volume {}%", (v * 100.0).round() as u32);
-            Ok(())
-        }
-        Command::Bench { synthetic: Some(n) } => aural::bench::synthetic(n),
-        Command::Bench { synthetic: None } => {
-            aural::engine::install_ctrlc();
-            aural::bench::live()
-        }
-        Command::Doctor => doctor(),
-        Command::About => {
-            println!("aural {}", env!("CARGO_PKG_VERSION"));
-            println!("Melodic keyboard sounds, system-wide. Port of aural-coding (Atom/VSCode).");
-            println!(
-                "Samples: FluidR3_GM soundfont (acoustic_grand_piano, synth_drum), CC BY 3.0."
-            );
-            println!("See README.md (Attribution) and DESIGN.md.");
-            Ok(())
-        }
+            SystemAction::Bench { synthetic } => match synthetic {
+                Some(n) => aural::bench::synthetic(n),
+                None => {
+                    aural::engine::install_ctrlc();
+                    aural::bench::live()
+                }
+            },
+            SystemAction::About => {
+                println!("aural {}", env!("CARGO_PKG_VERSION"));
+                println!(
+                    "Melodic keyboard sounds, system-wide. Port of aural-coding (Atom/VSCode)."
+                );
+                println!(
+                    "Samples: FluidR3_GM soundfont (acoustic_grand_piano, synth_drum), CC BY 3.0."
+                );
+                println!("See README.md (Attribution) and DESIGN.md.");
+                Ok(())
+            }
+            SystemAction::Daemon => {
+                aural::engine::install_ctrlc();
+                aural::engine::run(true, false, None)
+            }
+            SystemAction::Tray => {
+                #[cfg(any(target_os = "macos", target_os = "linux"))]
+                {
+                    aural::menubar::run()
+                }
+                #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+                {
+                    eprintln!("aural system tray: not supported on this platform");
+                    std::process::exit(1);
+                }
+            }
+            SystemAction::AclWait { user, uid, timeout } => {
+                #[cfg(target_os = "linux")]
+                {
+                    aural::system::linux::acl_wait(&user, uid, timeout)
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    let _ = (user, uid, timeout);
+                    eprintln!("aural system acl-wait: Linux only");
+                    std::process::exit(1);
+                }
+            }
+        },
     }
+}
+
+/// Bare `aural`: the help text — except inside the packaged Aural.app, where
+/// a no-argument launch is how Finder/`open` starts the app (the tray).
+fn run_default() -> Result<()> {
+    #[cfg(target_os = "macos")]
+    if aural::system::in_app_bundle() {
+        return aural::menubar::run();
+    }
+    // render_long_help so this matches `aural --help` exactly (print_help
+    // renders the short form).
+    print!("{}", Cli::command().render_long_help());
+    Ok(())
 }
 
 /// Whether the command installs the keyboard hook (needs Input Monitoring) or
-/// reports on it, so it is worth re-exec'ing disclaimed. `--stdin`,
-/// `--synthetic`, and the control commands (`start`/`stop`/`status`/`mute`/
-/// `volume`/`about`/`install`/`uninstall`) never touch the hook and need no TCC.
+/// reports on it, so it is worth re-exec'ing disclaimed. Bare `aural` is the
+/// help text (or, inside the app bundle, the tray — guarded below), and the
+/// control commands (`mute`/`volume`/`about`/…) never touch the hook.
 ///
-/// When launched from within the packaged `Aural.app` bundle, the responsible
-/// process is already "Aural" (a stable, grantable identity), so disclaiming
-/// would only create a *new* TCC identity (the raw binary path) that the user
-/// hasn't granted. Skip the re-exec in that case.
+/// When launched from within a `.app` bundle, the responsible process is
+/// already "Aural" (a stable, grantable identity), so disclaiming would only
+/// create a *new* TCC identity (the raw binary path) that the user hasn't
+/// granted. Skip the re-exec in that case.
 #[cfg(target_os = "macos")]
-fn disclaim_needed(cmd: &Command) -> bool {
-    if in_app_bundle() {
+fn disclaim_needed(cmd: Option<&Command>) -> bool {
+    if aural::system::in_app_bundle() {
         return false;
     }
-    matches!(
-        cmd,
-        Command::Run { stdin: false, .. }
-            | Command::Bench { synthetic: None }
-            | Command::Doctor
-            | Command::Menubar { .. }
-    )
+    match cmd {
+        None => false,
+        Some(Command::Stdin) => false,
+        Some(Command::System { action }) => matches!(
+            action,
+            SystemAction::Bench { synthetic: None }
+                | SystemAction::Doctor
+                | SystemAction::Daemon
+                | SystemAction::Tray
+        ),
+    }
 }
 
-/// True when the running binary lives inside a `.app` bundle (the packaged
-/// Aural.app), so TCC already attributes the grant to "Aural".
-#[cfg(target_os = "macos")]
-fn in_app_bundle() -> bool {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.ends_with("MacOS")))
-        .unwrap_or(false)
+/// Shared by `aural system mute` / `unmute`.
+fn set_muted(muted: bool) -> Result<()> {
+    aural::config::update(|c| c.muted = muted)?;
+    println!("aural: {}", if muted { "muted" } else { "unmuted" });
+    Ok(())
+}
+
+/// `aural system toggle` (and the hotkey's CLI equivalent).
+fn toggle_muted() -> Result<()> {
+    let c = aural::config::update(|c| c.muted = !c.muted)?;
+    println!("aural: {}", if c.muted { "muted" } else { "unmuted" });
+    Ok(())
 }
 
 fn doctor() -> Result<()> {
@@ -171,8 +219,8 @@ fn doctor() -> Result<()> {
     println!("aural {}", env!("CARGO_PKG_VERSION"));
     println!("config: {}", aural::config::path().display());
     match aural::daemon::status() {
-        Some(pid) => println!("daemon: running (pid {pid})"),
-        None => println!("daemon: not running"),
+        Some(pid) => println!("engine: running (pid {pid})"),
+        None => println!("engine: not running"),
     }
     match aural::audio::default_output() {
         Ok((device, supported)) => {
@@ -198,7 +246,16 @@ fn doctor() -> Result<()> {
         Err(e) => println!("assets: ERROR {e:#}"),
     }
     #[cfg(windows)]
-    println!("hook: WH_KEYBOARD_LL (installs on `aural run`; no admin required)");
+    println!("hook: WH_KEYBOARD_LL (installs when aural runs; no admin required)");
+    #[cfg(windows)]
+    println!(
+        "autostart: {}",
+        if aural::system::login_enabled() {
+            "registered (registry Run key)"
+        } else {
+            "not registered (`aural system enable`)"
+        }
+    );
     #[cfg(target_os = "macos")]
     {
         if aural::hook::listen_access_granted() {
@@ -206,10 +263,19 @@ fn doctor() -> Result<()> {
         } else {
             println!(
                 "hook: CGEventTap listen-only; Input Monitoring permission: NOT granted\n  \
-                 → grant this binary (or your terminal) in System Settings →\n    \
-                 Privacy & Security → Input Monitoring, then run `aural run`."
+                 → grant aural (or Aural, if the app is installed) in System Settings →\n    \
+                 Privacy & Security → Input Monitoring, then restart aural\n    \
+                 (`aural system install` relaunches the app)."
             );
         }
+        println!(
+            "autostart: {}",
+            if aural::system::login_enabled() {
+                "registered (LaunchAgent)"
+            } else {
+                "not registered (`aural system enable`)"
+            }
+        );
     }
     #[cfg(target_os = "macos")]
     println!("{}", aural::macos::secure_input_check());
@@ -220,15 +286,19 @@ fn doctor() -> Result<()> {
             std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "unknown".into()),
             std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "unknown".into())
         );
-        if aural::hook::listen_access_granted() {
+        if aural::system::linux::dedicated_installed() {
+            println!(
+                "install: dedicated-user mode — {}\n  \
+                 → a missing item below usually just needs one log out & back in\n    \
+                 (group and environment changes only apply to new sessions)",
+                aural::system::linux::verify_chain()
+            );
+        } else if aural::hook::listen_access_granted() {
             println!("hook: evdev listen-only; /dev/input access: granted");
         } else {
             println!(
                 "hook: evdev listen-only; /dev/input access: NOT granted\n  \
-                 → either add your user to the input group (log out & back in):\n    \
-                 sudo usermod -aG input $USER\n  \
-                 or run the daemon as a dedicated `aural` user (better isolation):\n    \
-                 sudo ./scripts/setup-dedicated-user.sh   (see README: Dedicated-user mode)"
+                 → `aural system install` sets up the dedicated-user mode (it asks for sudo)"
             );
         }
         if let Some(dir) = std::env::var_os("AURAL_CONFIG_DIR") {
@@ -237,18 +307,16 @@ fn doctor() -> Result<()> {
                 std::path::PathBuf::from(&dir).display()
             );
         }
-        if std::path::Path::new("/etc/systemd/system/aural.service").exists() {
-            println!(
-                "dedicated-user service: installed (daemon runs as `aural`; \
-                 control with `systemctl status aural`)"
-            );
-        }
         println!(
             "autostart: {}",
-            if aural::daemon::login_enabled() {
-                "registered (XDG autostart)"
+            if aural::system::login_enabled() {
+                if aural::system::linux::dedicated_installed() {
+                    "registered (aural.service)"
+                } else {
+                    "registered (XDG autostart)"
+                }
             } else {
-                "not registered (`aural install`)"
+                "not registered (`aural system enable`)"
             }
         );
     }

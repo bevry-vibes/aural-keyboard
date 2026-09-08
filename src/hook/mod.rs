@@ -138,7 +138,7 @@ pub(crate) fn handle_key(vk: u8, is_up: bool) {
     }
 }
 
-/// Testing aid (`aural run --stdin`): turn stdin characters into key presses
+/// Testing aid (`aural stdin`): turn stdin characters into key presses
 /// — no OS hook, no permissions. On a TTY, stdin is switched to
 /// character-at-a-time mode so keys play as typed; piped input is read by
 /// line (Enter plays Return after each). Uppercase and shifted punctuation

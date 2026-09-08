@@ -234,6 +234,14 @@ pub fn listen_access_granted() -> bool {
     unsafe { CGPreflightListenEventAccess() }
 }
 
+/// Ask for Input Monitoring — clearing this identity's stale TCC rows first
+/// so the System Settings list stays clean (rebuilds and unanswered requests
+/// accumulate rows; see `macos::reset_stale_tcc_entries`).
+fn request_listen_event_access() -> bool {
+    crate::macos::reset_stale_tcc_entries();
+    unsafe { CGRequestListenEventAccess() }
+}
+
 // --- spawn / stop ---
 
 /// Spawn the hook thread: create the listen-only tap, attach it to the
@@ -266,7 +274,7 @@ pub fn spawn(
         // requester is alive, and preflight flips as soon as the user allows
         // the prompt or toggles the entry in Settings.
         if !listen_access_granted() {
-            unsafe { CGRequestListenEventAccess() };
+            request_listen_event_access();
             eprintln!(
                 "aural: Input Monitoring permission is missing — waiting up to 5 minutes.\n  \
                  → Grant \"aural\" in System Settings → Privacy & Security → Input\n    \
@@ -308,13 +316,13 @@ pub fn spawn(
             if port.is_null() {
                 // One-shot TCC prompt (async; no-op once granted), then fail
                 // with actionable instructions.
-                let _ = CGRequestListenEventAccess();
+                request_listen_event_access();
                 ready_tx
                     .send(Err(anyhow::anyhow!(
                         "could not create the keyboard event tap (CGEventTapCreate failed)\n\
                          → Input Monitoring permission is missing for aural. Enable it in\n\
                          System Settings → Privacy & Security → Input Monitoring (the prompt\n\
-                         names aural), then run `aural run` again."
+                         names aural), then restart aural (`aural system install` relaunches the app)."
                     )))
                     .ok();
                 return;

@@ -71,7 +71,10 @@ impl Engine {
     }
 }
 
-/// Foreground/daemon supervision: stream, hook, config watch, stall watchdog.
+/// Engine supervision: stream, hook, config watch, stall watchdog. Runs the
+/// engine in every mode — foreground `aural`, the background daemon, and the
+/// tray-hosted app — writing the PID file so `status`/`stop`/`aural system`
+/// cover whichever instance is running.
 // device/supported are only read again on watchdog rebuilds, which the
 // flow-insensitive lint can't see.
 #[allow(unused_assignments)]
@@ -80,7 +83,8 @@ pub fn run(daemon: bool, stdin_keys: bool, bench_tx: Option<Sender<u64>>) -> Res
         crate::daemon::redirect_stdio_to_log();
     }
     let (engine, mut device, mut supported) = Engine::new()?;
-    let _single = crate::daemon::acquire_single_instance()?;
+    let _single = crate::daemon::acquire_single_instance()?
+        .context("another aural instance is already running")?;
 
     let mut stream: Option<cpal::Stream> = {
         let (s, info) = audio::start_stream(&device, &supported, engine.mixer(bench_tx))?;
@@ -91,6 +95,10 @@ pub fn run(daemon: bool, stdin_keys: bool, bench_tx: Option<Sender<u64>>) -> Res
         Some(s)
     };
     let config = config::load();
+    // Record the pid before installing the hook: the macOS grant wait can
+    // block there for minutes, and a blocked instance must stay visible to
+    // `aural status`/`stop`.
+    std::fs::write(config::pid_path(), std::process::id().to_string()).ok();
     let mut hook = None;
     if stdin_keys {
         eprintln!("aural: reading keys from stdin (each char = a key, Enter = Return)");
@@ -107,9 +115,6 @@ pub fn run(daemon: bool, stdin_keys: bool, bench_tx: Option<Sender<u64>>) -> Res
             config.hotkey
         );
         hook = Some(h);
-    }
-    if daemon {
-        std::fs::write(config::pid_path(), std::process::id().to_string()).ok();
     }
     eprintln!("aural: running — type anywhere");
 
@@ -172,8 +177,6 @@ pub fn run(daemon: bool, stdin_keys: bool, bench_tx: Option<Sender<u64>>) -> Res
         crate::hook::stop(hook);
     }
     drop(stream);
-    if daemon {
-        let _ = std::fs::remove_file(config::pid_path());
-    }
+    let _ = std::fs::remove_file(config::pid_path());
     Ok(())
 }

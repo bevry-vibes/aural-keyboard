@@ -13,3 +13,4 @@ pub mod mapping;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub mod menubar;
 pub mod mixer;
+pub mod system;

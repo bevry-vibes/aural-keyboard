@@ -7,7 +7,7 @@
 //! evdev sits below the display server, so the hook works identically under
 //! X11 and Wayland — the only global-capture route that does. The price is
 //! permission: reading `/dev/input/event*` requires the `input` group (checked
-//! by `aural doctor` and reported by [`spawn`] on failure).
+//! by `aural system doctor` and reported by [`spawn`] on failure).
 //!
 //! Hotplug: the device set is rescanned every 5 s, so keyboards connected
 //! later are picked up without a restart.
@@ -52,7 +52,7 @@ impl std::fmt::Display for HookHandle {
 }
 
 /// True when this process can read evdev devices (i.e. it is in the `input`
-/// group, or root). Used by `aural doctor` and mirrors the macOS TCC preflight.
+/// group, or root). Used by `aural system doctor` and mirrors the macOS TCC preflight.
 pub fn listen_access_granted() -> bool {
     first_keyboard_device().is_some()
 }
